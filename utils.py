@@ -10,6 +10,8 @@ import yt_dlp # Import the downloader library
 from bs4 import BeautifulSoup # Import BeautifulSoup
 from urllib.parse import urljoin # To construct absolute URLs
 import re
+from anthropic import Anthropic
+import numpy as np
 
 # --- Force loading .env and specify path ---
 # Find the .env file starting from the current script's directory
@@ -30,6 +32,11 @@ if not openai_api_key:
 else:
     # Print part of the key for verification (avoid printing the whole key)
     print(f"DEBUG: Found API Key starting with: {openai_api_key[:6]}... and ending with ...{openai_api_key[-4:]}")
+
+# Add Claude API key to environment variables check
+anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+if not anthropic_api_key:
+    print("WARNING: ANTHROPIC_API_KEY not found in environment variables. Claude judging will be skipped.")
 
 # --- Configuration ---
 # Define the judging rubric (can be loaded from config or UI later)
@@ -596,6 +603,232 @@ Ensure the keys in "scores" and "rationales" exactly match the criterion names f
         print(f"Error calling OpenAI API: {e}")
         return {"error": f"API call failed: {e}"}
 
+def get_claude_judgment(project_description, pitch_transcript, readme_content, rubric, repo_url=None):
+    """Generates AI judgment using Anthropic Claude based on provided texts and rubric."""
+    
+    # Get commit count if repo_url is provided
+    commit_count = None
+    if repo_url and "github.com" in repo_url:
+        commit_count = get_github_commit_count(repo_url)
+        print(f"DEBUG: GitHub repository has {commit_count} commits")
+    
+    # Load winning projects as reference
+    winning_projects_text = ""
+    try:
+        with open("winningprojects.txt", "r") as f:
+            winning_projects_text = f.read()
+        print("DEBUG: Successfully loaded winning projects reference data for Claude")
+    except Exception as e:
+        print(f"DEBUG: Could not load winning projects reference for Claude: {e}")
+        winning_projects_text = "Reference data unavailable."
+    
+    # --- Ensure criteria_str uses the passed rubric ---
+    criteria_str = "\n".join([
+        f"- {c['name']} (Weight: {c['weight']}%, Scale: {rubric['scale'][0]}-{rubric['scale'][1]}): {c['description']}"
+        for c in rubric['criteria']
+    ])
+
+    # Add commit count information to the prompt
+    commit_info = ""
+    if commit_count is not None:
+        commit_info = f"\n4. **GitHub Repository Commit Count:** {commit_count} commits"
+        if commit_count == 1:
+            commit_info += " (Note: Having only a single commit may indicate limited development effort or history, which should be considered when evaluating Technicality)"
+    
+    # --- Ensure the prompt uses the passed rubric's criteria names ---
+    prompt = f"""
+You are an AI Hackathon Judge for Ethereum Global hackathons. Evaluate the following project based on the provided information and the judging rubric.
+
+**Project Information:**
+1.  **Project Description:** {project_description}
+2.  **Pitch Transcript:** {pitch_transcript if pitch_transcript else "Not available"}
+3.  **README Content:** {readme_content if readme_content and not readme_content.startswith('Error:') else "Not available"}{commit_info}
+
+**Reference: Previous ETHGlobal Winning Projects**
+The following are descriptions of previous winning projects from ETHGlobal hackathons. Use these as reference points when evaluating the current project:
+
+{winning_projects_text[:3000]}  
+
+**Judging Rubric:**
+{criteria_str}
+
+**Instructions:**
+1.  Provide a score between {rubric['scale'][0]} and {rubric['scale'][1]} for each criterion.
+2.  For each criterion, provide a **detailed rationale** (3-5 sentences) explaining *why* the project received that specific score, referencing specific aspects of the project description, transcript, or README where applicable.
+3.  Compare the project to previous winning projects where relevant, noting similarities or differences in quality, innovation, or execution.
+4.  Provide an overall **feedback** section (a paragraph or bullet points) summarizing the project's strengths and suggesting specific areas for improvement.
+5.  Output the results strictly in JSON format with the following structure:
+{{
+  "scores": {{
+    "Criterion Name 1": score_1,
+    "Criterion Name 2": score_2,
+    ...
+  }},
+  "rationales": {{
+    "Criterion Name 1": "Detailed rationale text 1...",
+    "Criterion Name 2": "Detailed rationale text 2...",
+    ...
+  }},
+  "feedback": "Overall feedback text..."
+}}
+
+Ensure the keys in "scores" and "rationales" exactly match the criterion names from the rubric: {[c['name'] for c in rubric['criteria']]}. Ensure the "feedback" key is present.
+
+**Special Instructions:**
+- If the GitHub repository has only a single commit, this should negatively impact the Technicality score, as it suggests minimal development effort or history.
+- Consider how the current project compares to the quality and innovation level of previous winning projects.
+- Be particularly attentive to projects that demonstrate novel approaches to blockchain technology or solve real-world problems in unique ways.
+
+**JSON Output:**
+"""
+
+    # Check if Claude API key is available
+    if not anthropic_api_key:
+        print("ERROR: Anthropic API Key not configured.")
+        return {"error": "Anthropic API Key not configured."}
+    
+    try:
+        client = Anthropic(api_key=anthropic_api_key)
+        response = client.messages.create(
+            model="claude-3-sonnet-20240229",
+            max_tokens=4000,
+            temperature=0.5,
+            system="You are an AI Hackathon Judge evaluating projects based on a rubric. Output results in JSON format.",
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        # Extract JSON from Claude's response
+        result_text = response.content[0].text
+        
+        # Find JSON in the response (Claude might wrap it in markdown code blocks)
+        import re
+        json_match = re.search(r'```json\s*(.*?)\s*```', result_text, re.DOTALL)
+        if json_match:
+            result_json = json_match.group(1)
+        else:
+            # If not in code block, try to find JSON object directly
+            json_match = re.search(r'({.*})', result_text, re.DOTALL)
+            if json_match:
+                result_json = json_match.group(1)
+            else:
+                result_json = result_text  # Use the whole response as a fallback
+        
+        # Basic validation of the JSON structure
+        try:
+            parsed_result = json.loads(result_json)
+            if "scores" in parsed_result and "rationales" in parsed_result and "feedback" in parsed_result:
+                # Further check if keys match rubric criteria names
+                expected_keys = {c['name'] for c in rubric['criteria']}
+                if set(parsed_result["scores"].keys()) == expected_keys and \
+                   set(parsed_result["rationales"].keys()) == expected_keys:
+                    return parsed_result
+                else:
+                    print("Warning: Claude response JSON keys do not match rubric criteria.")
+                    # Attempt to return anyway, might need manual correction
+                    return parsed_result
+            else:
+                print("Error: Claude response JSON missing 'scores', 'rationales', or 'feedback' key.")
+                return {"error": "Invalid JSON structure from Claude (missing keys)."}
+        except json.JSONDecodeError as json_e:
+            print(f"Error decoding Claude response JSON: {json_e}")
+            print(f"Raw Claude response: {result_text}")
+            return {"error": f"Claude returned invalid JSON: {json_e}"}
+            
+    except Exception as e:
+        print(f"Error calling Anthropic API: {e}")
+        return {"error": f"API call failed: {e}"}
+
+def get_combined_judgment(project_description, pitch_transcript, readme_content, rubric, repo_url=None):
+    """Combines judgments from both OpenAI and Claude models for a more balanced evaluation."""
+    
+    print("DEBUG: Getting judgment from OpenAI GPT-4o...")
+    gpt_result = get_ai_judgment(project_description, pitch_transcript, readme_content, rubric, repo_url)
+    
+    print("DEBUG: Getting judgment from Anthropic Claude...")
+    claude_result = get_claude_judgment(project_description, pitch_transcript, readme_content, rubric, repo_url)
+    
+    # Check if either model returned an error
+    if "error" in gpt_result or "error" in claude_result:
+        if "error" in gpt_result and "error" in claude_result:
+            return {"error": f"Both models failed: GPT: {gpt_result['error']}, Claude: {claude_result['error']}"}
+        elif "error" in gpt_result:
+            print(f"WARNING: GPT judgment failed, using Claude only: {gpt_result['error']}")
+            return claude_result
+        else:
+            print(f"WARNING: Claude judgment failed, using GPT only: {claude_result['error']}")
+            return gpt_result
+    
+    # Combine scores by averaging
+    combined_scores = {}
+    for criterion in rubric['criteria']:
+        name = criterion['name']
+        gpt_score = gpt_result["scores"].get(name, 0)
+        claude_score = claude_result["scores"].get(name, 0)
+        
+        # Calculate average score
+        combined_scores[name] = round((gpt_score + claude_score) / 2, 1)
+    
+    # Combine rationales
+    combined_rationales = {}
+    for criterion in rubric['criteria']:
+        name = criterion['name']
+        gpt_rationale = gpt_result["rationales"].get(name, "")
+        claude_rationale = claude_result["rationales"].get(name, "")
+        
+        # Create a combined rationale that references both models
+        combined_rationales[name] = f"Combined assessment: {summarize_rationales(gpt_rationale, claude_rationale)}"
+    
+    # Combine feedback
+    gpt_feedback = gpt_result.get("feedback", "")
+    claude_feedback = claude_result.get("feedback", "")
+    combined_feedback = f"Combined feedback from multiple AI judges:\n\n{summarize_feedback(gpt_feedback, claude_feedback)}"
+    
+    # Return combined result
+    return {
+        "scores": combined_scores,
+        "rationales": combined_rationales,
+        "feedback": combined_feedback,
+        "individual_judgments": {
+            "gpt": gpt_result,
+            "claude": claude_result
+        }
+    }
+
+def summarize_rationales(gpt_rationale, claude_rationale):
+    """Summarizes two rationales into a concise combined assessment."""
+    # This is a simplified approach - in a production system, you might use an LLM to generate a better summary
+    
+    # Extract key points from each rationale
+    gpt_sentences = [s.strip() for s in gpt_rationale.split('.') if s.strip()]
+    claude_sentences = [s.strip() for s in claude_rationale.split('.') if s.strip()]
+    
+    # Take the first 1-2 sentences from each (depending on length)
+    gpt_key_points = gpt_sentences[:min(2, len(gpt_sentences))]
+    claude_key_points = claude_sentences[:min(2, len(claude_sentences))]
+    
+    # Combine unique points
+    all_points = set(gpt_key_points + claude_key_points)
+    
+    # Format the combined rationale
+    combined = ". ".join(all_points)
+    if not combined.endswith('.'):
+        combined += '.'
+        
+    return combined
+
+def summarize_feedback(gpt_feedback, claude_feedback):
+    """Combines and summarizes feedback from both models."""
+    # Split feedback into bullet points if possible
+    gpt_points = [p.strip() for p in gpt_feedback.split('\n') if p.strip()]
+    claude_points = [p.strip() for p in claude_feedback.split('\n') if p.strip()]
+    
+    # Combine unique points
+    all_points = set(gpt_points + claude_points)
+    
+    # Format as bullet points
+    return "\n".join([f"• {point}" for point in all_points])
 
 # --- Aggregation Function ---
 

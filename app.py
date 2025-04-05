@@ -325,10 +325,10 @@ if st.session_state.projects and not st.session_state.processing:
                         project_status_placeholder.info("ℹ️ No GitHub repository link available, skipping README")
                         readme_content = "N/A - No GitHub repository link provided"
 
-                    project_status_placeholder.info("🤖 Calling AI Judge...")
+                    project_status_placeholder.info("🤖 Calling AI Judges (GPT-4o and Claude)...")
                     # --- 5. AI Judging ---
                     # --- Pass the final_custom_rubric ---
-                    ai_result = utils.get_ai_judgment(
+                    ai_result = utils.get_combined_judgment(
                         project["description"],
                         transcript if not transcript.startswith("Error:") else None,
                         readme_content if not readme_content.startswith("Error:") else None,

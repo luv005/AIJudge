@@ -4,6 +4,7 @@ import utils # Import our helper functions
 import tempfile # To create temporary directories for downloads
 import os
 import shutil # To clean up temporary directories
+import copy # To deep copy the default rubric
 
 st.set_page_config(layout="wide")
 
@@ -17,59 +18,229 @@ if 'results' not in st.session_state:
     st.session_state.results = None
 if 'processing' not in st.session_state:
     st.session_state.processing = False # Flag to prevent multiple clicks
+# --- Initialize custom rubric weights in session state ---
+if 'custom_weights' not in st.session_state:
+    # Initialize with default weights from utils.DEFAULT_RUBRIC
+    st.session_state.custom_weights = {
+        criterion['name']: criterion['weight']
+        for criterion in utils.DEFAULT_RUBRIC['criteria']
+    }
 
-# --- Define Rubric (Using default from utils for now) ---
-# In a future version, this could be configurable in the UI
-rubric = utils.DEFAULT_RUBRIC
+# --- Define Rubric (Using default initially, will be customized) ---
+# Make a deep copy to avoid modifying the original DEFAULT_RUBRIC
+# This will be updated with custom weights before judging
+current_rubric = copy.deepcopy(utils.DEFAULT_RUBRIC)
 
-# --- Input Form ---
-st.header("Add Project for Judging")
-with st.form("project_form", clear_on_submit=True):
-    project_name = st.text_input("Project Name", key="project_name")
-    project_description = st.text_area("Project Description", key="project_desc")
-    # Changed from file_uploader to text_input for URL
-    pitch_video_url = st.text_input("Pitch Video URL (YouTube, Vimeo, direct link, etc.)", key="project_video_url")
-    github_repo_link = st.text_input("GitHub Repository Link", key="project_repo")
-    submitted = st.form_submit_button("Add Project")
+# --- Callback Functions ---
 
-    if submitted:
-        if not project_name:
-            st.warning("Please enter a project name.")
-        elif not project_description:
-            st.warning("Please enter a project description.")
-        elif not pitch_video_url: # Check for URL instead of file
-            st.warning("Please enter a pitch video URL.")
-        elif not github_repo_link:
-            st.warning("Please enter a GitHub repo link.")
+def add_single_project():
+    """Callback to scrape and add a single project."""
+    single_url = st.session_state.get("single_url", "") # Get URL from state
+    if not single_url or not single_url.startswith("http"):
+        st.warning("Please enter a valid URL.")
+        return # Exit callback if invalid
+
+    with st.spinner(f"Scraping project details from {single_url}..."):
+        scraped_data = utils.scrape_project_page(single_url)
+
+    if scraped_data and "error" not in scraped_data:
+        # Basic validation
+        if scraped_data.get("name", "Name Not Found") == "Name Not Found":
+             st.warning(f"Could not reliably scrape project name from {single_url}.", icon="⚠️")
+        if scraped_data.get("video_url", "Video URL Not Found") == "Video URL Not Found":
+             st.warning(f"Could not find a video URL on {single_url}.", icon="⚠️")
+        if scraped_data.get("repo_link", "GitHub Link Not Found") == "GitHub Link Not Found":
+             st.warning(f"Could not find a GitHub link on {single_url}.", icon="⚠️")
+
+        # Add to project list
+        st.session_state.projects.append({
+            "name": scraped_data.get("name", "Unknown Project"),
+            "description": scraped_data.get("description", "No description found."),
+            "video_url": scraped_data.get("video_url"),
+            "repo_link": scraped_data.get("repo_link"),
+            "status": "Pending",
+            "source_url": single_url
+        })
+        st.success(f"Project '{scraped_data.get('name', 'Unknown Project')}' added from URL!")
+        # Clear the input field state *within the callback*
+        st.session_state.single_url = ""
+    elif scraped_data and "error" in scraped_data:
+        st.error(f"Failed to scrape {single_url}: {scraped_data['error']}")
+    else:
+        st.error(f"An unknown error occurred while scraping {single_url}.")
+
+
+def add_projects_from_list():
+    """Callback to scrape a list page and add multiple projects."""
+    list_url = st.session_state.get("list_url", "") # Get URL from state
+    if not list_url or not list_url.startswith("http"):
+        st.warning("Please enter a valid URL.")
+        return # Exit callback if invalid
+
+    project_links = []
+    with st.spinner(f"Scanning {list_url} for project links..."):
+        scrape_result = utils.scrape_project_list_page(list_url)
+        if isinstance(scrape_result, dict) and "error" in scrape_result:
+             st.error(f"Failed to scan list page: {scrape_result['error']}")
+             return # Exit callback on error
+        elif isinstance(scrape_result, list):
+             project_links = scrape_result
+             st.info(f"Found {len(project_links)} potential project links. Now scraping details...")
         else:
-            # Store project details temporarily in session state
-            st.session_state.projects.append({
-                "name": project_name,
-                "description": project_description,
-                "video_url": pitch_video_url, # Store the URL
-                "repo_link": github_repo_link,
-                "status": "Pending" # Add a status field
-            })
-            st.success(f"Project '{project_name}' added!")
+             st.error("Unknown error scanning list page.")
+             return # Exit callback on error
+
+    if project_links:
+        added_count = 0
+        failed_count = 0
+        # Display progress within the main app area after callback runs
+        # We can't easily update progress bar *during* callback execution directly
+        # So we'll just show status messages.
+        st.info(f"Starting scrape for {len(project_links)} projects...")
+
+        for i, link in enumerate(project_links):
+            # Consider adding a small delay or status update if needed,
+            # but direct UI updates from callbacks are limited.
+            scraped_data = utils.scrape_project_page(link)
+
+            if scraped_data and "error" not in scraped_data:
+                 st.session_state.projects.append({
+                    "name": scraped_data.get("name", f"Unknown Project {i+1}"),
+                    "description": scraped_data.get("description", "No description found."),
+                    "video_url": scraped_data.get("video_url"),
+                    "repo_link": scraped_data.get("repo_link"),
+                    "status": "Pending",
+                    "source_url": link
+                 })
+                 added_count += 1
+            else:
+                failed_count += 1
+                error_msg = scraped_data.get('error', 'Unknown scraping error') if isinstance(scraped_data, dict) else 'Unknown scraping error'
+                st.warning(f"Skipped {link}: {error_msg}", icon="⚠️")
+
+        st.success(f"Finished scraping. Added {added_count} projects, failed to scrape {failed_count}.")
+        # Clear the input field state *within the callback*
+        st.session_state.list_url = ""
+
+
+# --- New Input Section ---
+st.header("Add Projects via URL")
+
+input_mode = st.radio(
+    "Select Input Mode:",
+    ("Single Project URL", "Project List URL (e.g., Showcase Page)"),
+    horizontal=True,
+    key="input_mode"
+)
+
+if input_mode == "Single Project URL":
+    # Input widget - reads initial value from state if it exists
+    single_url_input = st.text_input(
+        "Enter Project Showcase URL (e.g., ETHGlobal project page):",
+        key="single_url" # State key
+    )
+    # Button - triggers the callback on click
+    st.button(
+        "Fetch and Add Single Project",
+        key="fetch_single_btn", # Button's own key
+        on_click=add_single_project # Assign the callback
+    )
+    # The logic previously inside 'if st.button(...)' is now in add_single_project
+
+elif input_mode == "Project List URL (e.g., Showcase Page)":
+    # Input widget
+    list_url_input = st.text_input(
+        "Enter URL of page listing projects (e.g., ETHGlobal showcase):",
+        key="list_url" # State key
+    )
+    # Button - triggers the callback on click
+    st.button(
+        "Fetch Projects from List Page",
+        key="fetch_list_btn", # Button's own key
+        on_click=add_projects_from_list # Assign the callback
+    )
+    # The logic previously inside 'if st.button(...)' is now in add_projects_from_list
+
 
 # --- Display Added Projects ---
 st.header("Projects Added for Judging")
 if st.session_state.projects:
-    # Create a simple display for added projects
-    project_names = [p["name"] for p in st.session_state.projects]
-    st.write("Projects in queue:", ", ".join(project_names))
+    display_data = []
+    for p_idx, p in enumerate(st.session_state.projects): # Use enumerate for unique keys if needed later
+        full_desc = p.get('description', 'N/A')
+        # --- Truncate description for the table ---
+        truncated_desc = (full_desc[:150] + '...') if len(full_desc) > 150 else full_desc
+
+        display_data.append({
+            "Project Name": p.get('name', 'N/A'),
+            # --- Show truncated description ---
+            "Project Description": truncated_desc,
+            "Video Url": p.get('video_url', 'Not Found') if p.get('video_url') and p.get('video_url') != "Video URL Not Found" else 'Not Found',
+            "Github Repo link": p.get('repo_link', 'Not Found') if p.get('repo_link') and p.get('repo_link') != "GitHub Link Not Found" else 'Not Found',
+        })
+    st.dataframe(pd.DataFrame(display_data), use_container_width=True)
+    # Optional: Add expanders below the table to show full descriptions if needed
+    # with st.expander("View Full Descriptions"):
+    #     for p in st.session_state.projects:
+    #         st.markdown(f"**{p.get('name', 'N/A')}:**")
+    #         st.markdown(p.get('description', 'N/A'))
+    #         st.markdown("---")
 else:
-    st.info("No projects added yet. Use the form above.")
+    st.info("No projects added yet. Use the URL input options above.")
+
+# --- Rubric Weight Customization ---
+st.header("Customize Judging Weights (%)")
+total_weight = 0
+weights_valid = True
+
+# Use columns for better layout
+cols = st.columns(len(current_rubric['criteria']))
+
+for i, criterion in enumerate(current_rubric['criteria']):
+    criterion_name = criterion['name']
+    with cols[i]:
+        # Use slider for weight input, referencing session state
+        # The key for the slider must be unique, use criterion_name
+        st.session_state.custom_weights[criterion_name] = st.number_input(
+            label=f"{criterion_name} Weight",
+            min_value=0,
+            max_value=100,
+            value=st.session_state.custom_weights[criterion_name], # Get current value from state
+            step=5, # Increment by 5
+            key=f"weight_{criterion_name}" # Unique key for the widget
+        )
+        # Display description below slider
+        st.caption(criterion['description'])
+        total_weight += st.session_state.custom_weights[criterion_name]
+
+# Display total weight and validation message
+st.metric("Total Weight Allocated", f"{total_weight}%")
+if total_weight != 100:
+    st.warning(f"Weights must sum to 100%. Current total: {total_weight}%")
+    weights_valid = False
+else:
+    st.success("Weights sum to 100%. Ready to judge.")
 
 # --- Judging Trigger ---
 st.header("Start Judging")
 
 # Now, check conditions for showing the button *under* the header
+# Add check for valid weights
 if st.session_state.projects and not st.session_state.processing:
-    if st.button("Judge All Pending Projects"):
+    # Disable button if weights are invalid
+    judge_button_disabled = not weights_valid
+    button_tooltip = "Adjust weights to sum to 100% before judging." if judge_button_disabled else None
+
+    if st.button("Judge All Pending Projects", disabled=judge_button_disabled, help=button_tooltip):
         st.session_state.processing = True
         st.session_state.results = [] # Reset results
-        st.info(f"Starting judgment for {len(st.session_state.projects)} projects...")
+
+        # --- Construct the final rubric with custom weights ---
+        final_custom_rubric = copy.deepcopy(utils.DEFAULT_RUBRIC) # Start with default structure
+        for criterion in final_custom_rubric['criteria']:
+            criterion['weight'] = st.session_state.custom_weights.get(criterion['name'], 0) # Apply custom weight
+
+        st.info(f"Starting judgment for {len(st.session_state.projects)} projects using custom weights...")
 
         progress_bar = st.progress(0)
         total_projects = len(st.session_state.projects)
@@ -129,42 +300,39 @@ if st.session_state.projects and not st.session_state.processing:
 
                                 project_status_placeholder.info("🤖 Calling AI Judge...")
                                 # --- 5. AI Judging ---
+                                # --- Pass the final_custom_rubric ---
                                 ai_result = utils.get_ai_judgment(
-                                    project["description"], # Pass description
-                                    transcript if not transcript.startswith("Error:") else None, # Pass transcript
-                                    readme_content if not readme_content.startswith("Error:") else None, # Pass readme
-                                    rubric
+                                    project["description"],
+                                    transcript if not transcript.startswith("Error:") else None,
+                                    readme_content if not readme_content.startswith("Error:") else None,
+                                    final_custom_rubric # Pass the rubric with custom weights
                                 )
 
                                 if "error" in ai_result:
                                     st.error(f"Failed to judge {project['name']}: {ai_result['error']}")
-                                    scores = {c['name']: 0 for c in rubric['criteria']} # Assign 0 scores on error
-                                    rationales = {c['name']: f"Judging failed: {ai_result['error']}" for c in rubric['criteria']}
-                                    # --- Add default feedback on error ---
+                                    # Use final_custom_rubric for default scores/rationales
+                                    scores = {c['name']: 0 for c in final_custom_rubric['criteria']}
+                                    rationales = {c['name']: f"Judging failed: {ai_result['error']}" for c in final_custom_rubric['criteria']}
                                     feedback = f"AI Judging Error: {ai_result['error']}"
                                     total_score = 0
                                     project["status"] = "Error"
                                 else:
                                     scores = ai_result.get("scores", {})
                                     rationales = ai_result.get("rationales", {})
-                                    # --- Get feedback from successful result ---
                                     feedback = ai_result.get("feedback", "No feedback provided by AI.")
-                                    total_score = utils.calculate_total_score(scores, rubric)
+                                    # --- Pass final_custom_rubric to calculate score ---
+                                    total_score = utils.calculate_total_score(scores, final_custom_rubric)
                                     project["status"] = "Judged"
                                     project_status_placeholder.success("Judgment complete!")
-
-                                # This part was outside the else block, should be inside or handled differently
-                                # final_scores = scores # This variable isn't used later
-                                # total_score = total_score # This assignment is redundant
 
                 except Exception as e:
                     project["status"] = f"Error: {e}"
                     transcript = transcript or "N/A"
                     readme_content = readme_content or "N/A"
                     ai_result = {"error": str(e)}
-                    scores = {c['name']: 0 for c in rubric['criteria']} # Assign 0 scores on error
-                    rationales = {c['name']: f"Judging failed: {e}" for c in rubric['criteria']}
-                    # --- Add default feedback on exception ---
+                    # Use final_custom_rubric for default scores/rationales
+                    scores = {c['name']: 0 for c in final_custom_rubric['criteria']}
+                    rationales = {c['name']: f"Judging failed: {e}" for c in final_custom_rubric['criteria']}
                     feedback = f"Processing Error: {e}"
                     total_score = 0
 
@@ -173,10 +341,8 @@ if st.session_state.projects and not st.session_state.processing:
                     "Project Name": project["name"],
                     "Description": project["description"],
                     "Total Score": total_score,
-                    # --- Store the scores dictionary correctly ---
-                    "scores": scores, # Store the dictionary under the key "scores"
+                    "scores": scores,
                     "Rationales": rationales,
-                    # --- Store the feedback string ---
                     "feedback": feedback,
                     "Transcript": transcript,
                     "README": readme_content,
@@ -214,7 +380,16 @@ elif not st.session_state.projects:
 # --- Display Results ---
 st.header("Judging Results")
 if st.session_state.results:
-    # Prepare DataFrame for display (excluding nested rationales/feedback for main table)
+    # --- Use the *last used* custom rubric for display headers/details ---
+    # Reconstruct the rubric used for the displayed results if possible
+    # For simplicity, we'll assume the current weights in session state
+    # reflect the weights used for the last judgment run.
+    # A more robust solution might store the rubric used with the results.
+    display_rubric = copy.deepcopy(utils.DEFAULT_RUBRIC)
+    for criterion in display_rubric['criteria']:
+        criterion['weight'] = st.session_state.custom_weights.get(criterion['name'], 0)
+
+    # Prepare DataFrame for display
     display_df_data = []
     for res in st.session_state.results:
         row = {
@@ -226,14 +401,16 @@ if st.session_state.results:
         # Add individual scores to the row
         # --- Access scores correctly from the nested dictionary ---
         project_scores = res.get("scores", {}) # Get the scores dict for this project
-        for crit in rubric['criteria']:
+        for crit in display_rubric['criteria']:
             row[crit['name']] = project_scores.get(crit['name'], 'N/A') # Get score from project_scores
         display_df_data.append(row)
 
     results_df = pd.DataFrame(display_df_data)
-    st.dataframe(results_df.set_index('Rank'))
+    # --- Dynamically set columns based on display_rubric ---
+    column_order = ["Rank", "Project Name", "Total Score", "Status"] + [c['name'] for c in display_rubric['criteria']]
+    st.dataframe(results_df.set_index('Rank')[column_order]) # Reorder columns
 
-    # --- Display Detailed Rationales and Feedback ---
+    # --- Display Detailed Judging Breakdown ---
     st.subheader("Detailed Judging Breakdown")
     for i, res in enumerate(st.session_state.results):
         st.markdown(f"---") # Separator
@@ -241,19 +418,25 @@ if st.session_state.results:
         st.markdown(f"**Status:** {res.get('Status', 'Unknown')}")
         st.markdown(f"**Total Score:** {res.get('Total Score', 'N/A')}")
 
-        # Display Rationales per criterion
+        # --- Display the FULL Project Description here ---
+        with st.expander("View Full Project Description"):
+             # Access the full description stored during results aggregation
+             # Assuming the 'Description' key was added to results_list
+             full_description = res.get('Description', 'Full description not available in results.')
+             st.markdown(full_description)
+
+        # Display Scores & Rationales per criterion
         st.markdown("**Scores & Rationales:**")
         rationales = res.get('Rationales', {})
-        # --- Access scores correctly from the nested dictionary ---
-        scores = res.get('scores', {}) # Get the scores dict for this project
-        if rationales or scores: # Check if either exists
-            for crit in rubric['criteria']:
+        scores = res.get('scores', {})
+        if rationales or scores:
+            # --- Use display_rubric criteria for iteration ---
+            for crit in display_rubric['criteria']:
                 criterion_name = crit['name']
-                # --- Get score from the nested scores dict ---
                 score = scores.get(criterion_name, "N/A")
                 rationale = rationales.get(criterion_name, "No rationale provided.")
-                # Use an expander for each criterion
-                with st.expander(f"**{criterion_name}:** {score}/{rubric['scale'][1]}"):
+                # --- Use display_rubric scale ---
+                with st.expander(f"**{criterion_name}:** {score}/{display_rubric['scale'][1]}"):
                     st.write(rationale)
         else:
             st.warning("No detailed scores or rationales available for this project.")

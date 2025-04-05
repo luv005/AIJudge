@@ -4,4 +4,6 @@ moviepy
 requests
 python-dotenv  # For loading .env file locally
 pandas         # Useful for handling and displaying data
-yt-dlp          # For downloading videos from URLs 
+yt-dlp          # For downloading videos from URLs
+beautifulsoup4 # For web scraping
+lxml           # Add the lxml parser library 

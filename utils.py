@@ -304,42 +304,41 @@ def scrape_project_list_page(list_url):
 
         soup = BeautifulSoup(response.content, 'html.parser')
 
-        # --- Find Links to Individual Projects ---
-        # This requires inspecting the list page structure.
-        # Example: Find all <a> tags within elements having class 'project-card'
-        # Based on inspection (may change): Links are often within divs with class like 'card' or similar
-        # And the link itself might have a specific class or structure.
-        # Let's assume project links are <a> tags inside a specific container.
-        # Find a container first, e.g., <div id="showcase-projects">
-        # project_container = soup.find('div', id='showcase-projects') # Hypothetical
-        # if project_container:
-        #    links = project_container.find_all('a', href=True)
-        # else: # Fallback: search all links
-        #    links = soup.find_all('a', href=True)
-
-        # Simpler approach: Find all links whose href starts with '/showcase/'
+        # Find all links whose href starts with '/showcase/'
         links = soup.find_all('a', href=lambda href: href and href.startswith('/showcase/'))
 
-        found_urls = set() # Use a set to avoid duplicates
+        found_urls = set()  # Use a set to avoid duplicates
         for link in links:
             href = link['href']
             # Construct absolute URL
             absolute_url = urljoin(list_url, href)
+            
+            # Skip non-project links like "Find a Project" or search pages
+            if any(skip_term in href.lower() for skip_term in [
+                'find-a-project', 
+                'search', 
+                'filter', 
+                'category', 
+                'track'
+            ]):
+                print(f"DEBUG: Skipping non-project URL: {absolute_url}")
+                continue
+                
             # Basic check to avoid non-project links if possible
             if '/showcase/' in absolute_url and absolute_url != list_url and absolute_url not in found_urls:
-                 # Add more filtering if needed (e.g., check URL structure further)
-                 project_links.append(absolute_url)
-                 found_urls.add(absolute_url)
+                # Add more filtering if needed (e.g., check URL structure further)
+                project_links.append(absolute_url)
+                found_urls.add(absolute_url)
 
         print(f"Found {len(project_links)} potential project links on {list_url}")
         return project_links
 
     except requests.exceptions.RequestException as e:
-        print(f"Error fetching project list page {list_url}: {e}")
-        return {"error": f"Network error fetching list page: {e}"} # Return dict to signal error
+        print(f"Error fetching list page {list_url}: {e}")
+        return {"error": f"Network error fetching page: {e}"}
     except Exception as e:
-        print(f"Error scraping project list page {list_url}: {e}")
-        return {"error": f"Scraping failed: {e}"} # Return dict to signal error
+        print(f"Error scraping list page {list_url}: {e}")
+        return {"error": f"Scraping failed: {e}"}
 
 
 # --- Preprocessing Functions ---

@@ -5,10 +5,23 @@ import tempfile # To create temporary directories for downloads
 import os
 import shutil # To clean up temporary directories
 import copy # To deep copy the default rubric
+from PIL import Image  # Add this import for handling images
 
-st.set_page_config(layout="wide")
+st.set_page_config(layout="wide", page_title="AI Judge", page_icon="⚖️")
 
-st.title(" Hackathon AI Judge MVP ")
+# --- Sidebar with Logo ---
+st.sidebar.header("AI Judge")
+try:
+    # Try to load and display the logo
+    logo = Image.open("AIJudgeLogo.png")
+    st.sidebar.image(logo, width=200)
+except Exception as e:
+    # If logo can't be loaded, show a text message instead
+    st.sidebar.info("AI Judge - Automated Hackathon Project Evaluation")
+    print(f"Note: Could not load logo: {e}")
+
+# --- Main Title ---
+st.title("ETH Hackathon AI Judge")
 
 # --- Session State Initialization ---
 # Use session state to store project data and results across reruns

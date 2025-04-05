@@ -12,6 +12,8 @@ from urllib.parse import urljoin # To construct absolute URLs
 import re
 from anthropic import Anthropic
 import numpy as np
+from web3 import Web3
+from decimal import Decimal # For precise amount handling
 
 # --- Force loading .env and specify path ---
 # Find the .env file starting from the current script's directory
@@ -1048,4 +1050,183 @@ def scrape_ethglobal_project(url):
         }
         
     except Exception as e:
-        return {"error": f"Error scraping ETHGlobal project: {e}"} 
+        return {"error": f"Error scraping ETHGlobal project: {e}"}
+
+# --- Blockchain Interaction Functions ---
+
+def distribute_rewards(private_key=None, rpc_url=None, winners_data=None, token_address=None):
+    """
+    Distributes rewards (native MATIC or ERC20 tokens) to winners on a given network.
+    
+    Args:
+        private_key (str, optional): Private key of the sending wallet. If None, will try to load from environment.
+        rpc_url (str, optional): RPC URL for the network. If None, will try to load from environment.
+        winners_data (list): A list of dictionaries, e.g., [{'address': '0x...', 'amount': '10.5'}, ...]
+                               Amounts should be strings representing the token amount (e.g., "10.5" MATIC or tokens).
+        token_address (str, optional): The contract address of the ERC20 token.
+                                       If None, native currency (MATIC) is sent. Defaults to None.
+
+    Returns:
+        list: A list of dictionaries with results for each transaction,
+              e.g., [{'address': '0x...', 'amount': '10.5', 'status': 'success', 'tx_hash': '0x...'},
+                     {'address': '0x...', 'amount': '5', 'status': 'error', 'message': 'Reason...'}]
+    """
+    results = []
+    try:
+        # Get private key from environment if not provided
+        if not private_key:
+            private_key = os.getenv("DISTRIBUTOR_PRIVATE_KEY")
+            if not private_key:
+                raise ValueError("No distributor private key provided or found in environment variables.")
+            print("Using distributor private key from environment variables.")
+        
+        # Get RPC URL from environment if not provided
+        if not rpc_url:
+            rpc_url = os.getenv("POLYGON_RPC_URL", "https://polygon-rpc.com")
+            print(f"Using RPC URL from environment: {rpc_url}")
+        
+        # Validate winners_data
+        if not winners_data or not isinstance(winners_data, list) or len(winners_data) == 0:
+            raise ValueError("No valid winners data provided.")
+            
+        # 1. Connect to the network
+        w3 = Web3(Web3.HTTPProvider(rpc_url))
+        
+        if not w3.is_connected():
+            raise ConnectionError(f"Failed to connect to RPC URL: {rpc_url}")
+        print(f"Connected to {rpc_url}, Chain ID: {w3.eth.chain_id}")
+
+        # 2. Load sender account
+        sender_account = w3.eth.account.from_key(private_key)
+        sender_address = sender_account.address
+        print(f"Sender address: {sender_address}")
+
+        # 3. Get sender nonce
+        nonce = w3.eth.get_transaction_count(sender_address)
+        print(f"Initial nonce: {nonce}")
+
+        # 4. Prepare token contract (if applicable)
+        token_contract = None
+        token_decimals = 18 # Default for MATIC and many ERC20s
+        if token_address:
+            token_address = w3.to_checksum_address(token_address)
+            # Minimal ERC20 ABI for transfer and decimals
+            erc20_abi = [
+                {"constant":True,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"payable":False,"stateMutability":"view","type":"function"},
+                {"constant":False,"inputs":[{"name":"_to","type":"address"},{"name":"_value","type":"uint256"}],"name":"transfer","outputs":[{"name":"","type":"bool"}],"payable":False,"stateMutability":"nonpayable","type":"function"}
+            ]
+            token_contract = w3.eth.contract(address=token_address, abi=erc20_abi)
+            try:
+                token_decimals = token_contract.functions.decimals().call()
+                print(f"Token: {token_address}, Decimals: {token_decimals}")
+            except Exception as e:
+                 raise ValueError(f"Could not fetch decimals for token {token_address}. Is it a valid ERC20 contract? Error: {e}")
+
+        # 5. Process each winner
+        for winner in winners_data:
+            recipient_address_str = winner.get('address')
+            amount_str = winner.get('amount')
+            current_result = winner.copy() # Start building result dict
+
+            try:
+                # Validate inputs
+                if not recipient_address_str or not amount_str:
+                    raise ValueError("Missing address or amount.")
+                if not w3.is_address(recipient_address_str):
+                     raise ValueError(f"Invalid recipient address: {recipient_address_str}")
+                recipient_address = w3.to_checksum_address(recipient_address_str)
+
+                # Convert amount string to Wei (smallest unit)
+                try:
+                    amount_decimal = Decimal(amount_str)
+                    if amount_decimal <= 0:
+                        raise ValueError("Amount must be positive.")
+                    amount_in_wei = int(amount_decimal * (10**token_decimals))
+                except Exception:
+                    raise ValueError(f"Invalid amount format: {amount_str}")
+
+                print(f"\nProcessing: To {recipient_address}, Amount: {amount_str} ({amount_in_wei} wei)")
+
+                # Build transaction - using legacy transaction format instead of EIP-1559
+                tx_params = {
+                    'from': sender_address,
+                    'nonce': nonce,
+                    'gas': 200000,  # Set a reasonable default gas limit
+                    'gasPrice': w3.to_wei('50', 'gwei'),  # Use legacy gasPrice instead of maxFeePerGas/maxPriorityFeePerGas
+                    'chainId': w3.eth.chain_id,
+                }
+
+                if token_contract:
+                    # ERC20 Transfer
+                    tx_params['to'] = token_address
+                    # Estimate gas for token transfer
+                    try:
+                         estimated_gas = token_contract.functions.transfer(recipient_address, amount_in_wei).estimate_gas({'from': sender_address})
+                         tx_params['gas'] = int(estimated_gas * 1.2) # Add buffer
+                         print(f"Estimated Gas (ERC20): {estimated_gas}, Using: {tx_params['gas']}")
+                    except Exception as gas_err:
+                         print(f"WARN: Gas estimation failed for ERC20 transfer: {gas_err}. Using default limit.")
+                         # Keep default gas limit if estimation fails
+
+                    # Build transaction data
+                    unsigned_tx = token_contract.functions.transfer(
+                        recipient_address,
+                        amount_in_wei
+                    ).build_transaction(tx_params)
+
+                else:
+                    # Native Currency (MATIC) Transfer
+                    tx_params['to'] = recipient_address
+                    tx_params['value'] = amount_in_wei
+                    # Estimate gas for native transfer
+                    try:
+                        estimated_gas = w3.eth.estimate_gas({'from': sender_address, 'to': recipient_address, 'value': amount_in_wei})
+                        tx_params['gas'] = int(estimated_gas * 1.2) # Add buffer
+                        print(f"Estimated Gas (Native): {estimated_gas}, Using: {tx_params['gas']}")
+                    except Exception as gas_err:
+                        print(f"WARN: Gas estimation failed for native transfer: {gas_err}. Using default limit.")
+                        # Keep default gas limit if estimation fails
+
+                    unsigned_tx = tx_params # For native transfer, params are the tx
+
+                try:
+                    # Sign transaction - handle different web3.py versions
+                    signed_tx = w3.eth.account.sign_transaction(unsigned_tx, private_key)
+                    
+                    # Different versions of web3.py have different attributes for the raw transaction
+                    if hasattr(signed_tx, 'rawTransaction'):
+                        raw_tx = signed_tx.rawTransaction
+                    elif hasattr(signed_tx, 'raw_transaction'):
+                        raw_tx = signed_tx.raw_transaction
+                    else:
+                        # Try accessing as dictionary
+                        raw_tx = signed_tx.get('rawTransaction') or signed_tx.get('raw_transaction')
+                        if not raw_tx:
+                            raise AttributeError("Could not find raw transaction data in signed transaction object")
+                    
+                    # Send transaction
+                    tx_hash = w3.eth.send_raw_transaction(raw_tx)
+                    print(f"Transaction sent: {tx_hash.hex()}")
+                    
+                except Exception as tx_error:
+                    print(f"Transaction error details: {tx_error}")
+                    print(f"Signed transaction object: {dir(signed_tx)}")  # Print available attributes for debugging
+                    raise
+
+                current_result['status'] = 'success'
+                current_result['tx_hash'] = tx_hash.hex()
+                nonce += 1 # Increment nonce for the next transaction
+
+            except Exception as e:
+                print(f"ERROR processing {winner}: {e}")
+                current_result['status'] = 'error'
+                current_result['message'] = str(e)
+
+            results.append(current_result)
+
+    except Exception as e:
+        print(f"FATAL ERROR during reward distribution setup: {e}")
+        # Add a general error result if setup fails
+        results.append({'status': 'error', 'message': f"Setup failed: {e}"})
+
+    return results 

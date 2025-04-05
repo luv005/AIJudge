@@ -9,4 +9,5 @@ yt-dlp          # For downloading videos from URLs
 beautifulsoup4 # For web scraping
 lxml           # Add the lxml parser library
 numpy==1.24.3  # Pin numpy (compatible with older moviepy)
-pillow 
+pillow
+web3==5.31.1   # Replace 6.11.1 with this older version that has geth_poa_middleware 

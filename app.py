@@ -6,6 +6,7 @@ import os
 import shutil # To clean up temporary directories
 import copy # To deep copy the default rubric
 from PIL import Image  # Add this import for handling images
+import io # For parsing CSV data from text area
 
 st.set_page_config(layout="wide", page_title="AI Judge", page_icon="⚖️")
 
@@ -510,6 +511,87 @@ if st.session_state.results:
 
 else:
     st.info("No results to display yet. Add projects and click 'Judge All Pending Projects'.")
+
+# --- Reward Distribution Section (In Sidebar) ---
+st.sidebar.header("🏆 Reward Distribution (Polygon)")
+
+# Check if distributor key is configured
+distributor_pk_configured = os.getenv("DISTRIBUTOR_PRIVATE_KEY") is not None
+if not distributor_pk_configured:
+    st.sidebar.warning(
+        """
+        **Configuration Required:** Add your distributor wallet private key to the `.env` file:
+        ```
+        DISTRIBUTOR_PRIVATE_KEY=your_private_key_here
+        ```
+        For security, NEVER share this key or commit it to version control.
+        """
+    )
+
+st.sidebar.subheader("Winners Data")
+winners_input = st.sidebar.text_area(
+    "Enter Winners (Address,Polygon Amount per line)",
+    height=150,
+    key="winners_data",
+    help="Format: 0xAddress,RewardAmount\nExample:\n0x123...,100\n0x456...,50.5"
+)
+
+if st.sidebar.button("💸 Distribute Rewards", key="distribute_button", disabled=not distributor_pk_configured):
+    if not distributor_pk_configured:
+        st.sidebar.error("Distributor private key is not configured in the .env file.")
+    elif not winners_input:
+        st.sidebar.error("Winners data cannot be empty.")
+    else:
+        # Parse winners data
+        parsed_winners = []
+        try:
+            reader = io.StringIO(winners_input)
+            for line in reader:
+                line = line.strip()
+                if not line or ',' not in line:
+                    continue # Skip empty or invalid lines
+                address, amount_str = line.split(',', 1)
+                parsed_winners.append({'address': address.strip(), 'amount': amount_str.strip()})
+
+            if not parsed_winners:
+                 raise ValueError("No valid winner entries found in the input.")
+
+            st.sidebar.info(f"Parsed {len(parsed_winners)} winner entries. Starting distribution...")
+
+            # Call the backend function - now without passing the private key directly
+            with st.spinner("Sending transactions... Please wait."):
+                distribution_results = utils.distribute_rewards(
+                    # private_key is now loaded from environment in the function
+                    # rpc_url is now loaded from environment in the function
+                    winners_data=parsed_winners,
+                    # token_address is now loaded from environment in the function
+                )
+
+            # Display results
+            st.sidebar.subheader("Distribution Results")
+            success_count = 0
+            error_count = 0
+            for res in distribution_results:
+                if res.get('status') == 'success':
+                    success_count += 1
+                    st.sidebar.success(f"✅ To: {res['address'][:6]}...{res['address'][-4:]}, Amount: {res['amount']}, Tx: {res['tx_hash'][:10]}...")
+                elif res.get('status') == 'error':
+                    error_count += 1
+                    addr = res.get('address', 'N/A')
+                    amt = res.get('amount', 'N/A')
+                    st.sidebar.error(f"❌ To: {addr}, Amount: {amt}, Error: {res.get('message', 'Unknown error')}")
+                else:
+                     st.sidebar.warning(f"❓ Unknown status for entry: {res}")
+
+            st.sidebar.info(f"Distribution complete. Success: {success_count}, Errors: {error_count}")
+
+        except ValueError as ve:
+             st.sidebar.error(f"Input Error: {ve}")
+        except Exception as e:
+            st.sidebar.error(f"An unexpected error occurred: {e}")
+            # Log the full error for debugging if needed
+            print(f"Distribution Error Traceback: {e}", exc_info=True)
+
 
 # --- Option to Clear Data ---
 st.sidebar.header("Admin")

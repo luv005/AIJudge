@@ -1,10 +1,8 @@
 # Add setuptools first to provide distutils
 setuptools>=65.5.0
 
-# Pin streamlit to a specific version
+# Core dependencies without web3
 streamlit==1.30.0
-
-# Keep other dependencies
 openai
 anthropic
 requests
@@ -14,15 +12,9 @@ yt-dlp
 beautifulsoup4
 lxml
 pillow
-
-# Try a newer numpy version with potentially better Python 3.12 support
 numpy==1.26.4
+moviepy==1.0.3
 
-# Pin web3 to a version that works with protobuf>=3.20
-web3==6.0.0
-
-# Use protobuf version compatible with streamlit
-protobuf==3.20.0
-
-# Add moviepy last (depends on numpy)
-moviepy==1.0.3 
+# Add web3 without pinning protobuf
+# This allows pip to find a compatible protobuf version
+web3>=6.0.0 

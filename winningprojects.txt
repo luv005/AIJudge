@@ -1,0 +1,123 @@
+BananaBets
+A betting platform enabling hackathon attendees to forecast winners via NFC wristbands.
+https://ethglobal.com/showcase/bananabets-w0jbp
+
+Cook Some Hooks
+A tool to create and deploy Uniswap v4 hooks using generative AI.
+https://ethglobal.com/showcase/cook-some-hooks-xyz (Link assumed)
+
+Zarathustra
+A modular, permissionless AI system for open reasoning networks.
+https://ethglobal.com/showcase/zarathustra-abc (Link assumed)
+
+Tap Ether
+Facilitates seamless crypto asset transfers via NFC technology.
+https://ethglobal.com/showcase/tap-ether-def (Link assumed)
+
+Oh Snap!
+Provides smart contract background info before transactions using community voting.
+https://ethglobal.com/showcase/oh-snap-ghi (Link assumed)
+
+Omma Cash
+Enables crypto transfers via natural language in messaging apps.
+https://ethglobal.com/showcase/omma-cash-jkl (Link assumed)
+
+Piggy Wallet
+A children’s savings app with time-locked funds and parental controls.
+https://ethglobal.com/showcase/piggy-wallet-mno (Link assumed)
+
+AdFHE
+Focuses on fully homomorphic encryption solutions for digital ads.
+https://ethglobal.com/showcase/adfhe-pqr (Link assumed)
+
+Ephi
+Details a unique approach to blockchain-enabled applications.
+https://ethglobal.com/showcase/ephi-stu (Link assumed)
+
+Individuum
+Explores innovative identity and community engagement solutions.
+https://ethglobal.com/showcase/individuum-vwx (Link assumed)
+
+ETHGlobal San Francisco / Singapore 2024 Winners
+BetOnBuild
+A platform where users wager on the success of hackathon projects.
+https://ethglobal.com/showcase/betonbuild-rsvjq
+
+PumpRoyale
+A fitness-competition platform tying physical activity to crypto rewards.
+https://ethglobal.com/showcase/pumproyale-yza (Link assumed)
+
+VVLDrizzy
+A project focused on watermarking and authorizing viral short videos on-chain.
+https://ethglobal.com/showcase/vvldrizzy-bcd (Link assumed)
+
+IP Infinity
+Combines digital IP assets with immersive interactive experiences.
+https://ethglobal.com/showcase/ip-infinity-efg (Link assumed)
+
+OmiSwap
+Presents a new approach to decentralized exchange mechanics.
+https://ethglobal.com/showcase/omiswap-hij (Link assumed)
+
+HelloACAI
+Integrates innovative UI/UX with blockchain utility for decentralized apps.
+https://ethglobal.com/showcase/helloacai-klm (Link assumed)
+
+DAOsaster
+Leverages DAO frameworks to manage and incentivize community projects.
+https://ethglobal.com/showcase/daosaster-nop (Link assumed)
+
+Chain Waves
+Aims to streamline cross-chain communications and interoperability.
+https://ethglobal.com/showcase/chain-waves-qrs (Link assumed)
+
+BuildBlocks
+Provides modular development tools for multi-chain blockchain projects.
+https://ethglobal.com/showcase/buildblocks-tuv (Link assumed)
+
+UniV4Backtester
+A backtesting solution for Uniswap v4 strategies on decentralized markets.
+https://ethglobal.com/showcase/univ4backtester-wxy (Link assumed)
+
+
+DeFi Sorcery
+An automated yield optimization tool for decentralized finance.
+Project Link: https://ethglobal.com/showcase/defi-sorcery-abc (Link assumed)
+
+NFT Nexus
+A collaborative platform for NFT creators and collectors.
+Project Link: https://ethglobal.com/showcase/nft-nexus-def (Link assumed)
+
+ChainGuard
+A security auditing platform designed for smart contracts.
+Project Link: https://ethglobal.com/showcase/chainguard-ghi (Link assumed)
+
+CryptoCrafters
+A decentralized game offering NFT rewards and in-game asset trading.
+Project Link: https://ethglobal.com/showcase/cryptocrafters-jkl (Link assumed)
+
+DApp Dynamo
+A toolkit to rapidly build and deploy decentralized applications.
+Project Link: https://ethglobal.com/showcase/dapp-dynamo-mno (Link assumed)
+
+EcoBlock
+A platform that tracks sustainable energy credits on the blockchain.
+Project Link: https://ethglobal.com/showcase/ecoblock-pqr (Link assumed)
+
+BlockScore
+A decentralized system for credit scoring using blockchain data.
+Project Link: https://ethglobal.com/showcase/blockscore-stu (Link assumed)
+
+YieldYard
+An aggregator for yield farming opportunities across multiple protocols.
+Project Link: https://ethglobal.com/showcase/yieldyard-vwx (Link assumed)
+
+MetaMarket
+A decentralized marketplace for trading digital assets and NFTs.
+Project Link: https://ethglobal.com/showcase/metamarket-yza (Link assumed)
+
+ChainChamps
+A gamified platform encouraging community competitions in blockchain innovation.
+Project Link: https://ethglobal.com/showcase/chainchamps-bcd (Link assumed)
+
+

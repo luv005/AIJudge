@@ -477,6 +477,16 @@ def get_ai_judgment(project_description, pitch_transcript, readme_content, rubri
         commit_count = get_github_commit_count(repo_url)
         print(f"DEBUG: GitHub repository has {commit_count} commits")
     
+    # Load winning projects as reference
+    winning_projects_text = ""
+    try:
+        with open("winningprojects.txt", "r") as f:
+            winning_projects_text = f.read()
+        print("DEBUG: Successfully loaded winning projects reference data")
+    except Exception as e:
+        print(f"DEBUG: Could not load winning projects reference: {e}")
+        winning_projects_text = "Reference data unavailable."
+    
     # --- Ensure criteria_str uses the passed rubric ---
     criteria_str = "\n".join([
         f"- {c['name']} (Weight: {c['weight']}%, Scale: {rubric['scale'][0]}-{rubric['scale'][1]}): {c['description']}"
@@ -492,12 +502,17 @@ def get_ai_judgment(project_description, pitch_transcript, readme_content, rubri
     
     # --- Ensure the prompt uses the passed rubric's criteria names ---
     prompt = f"""
-You are an AI Hackathon Judge. Evaluate the following project based on the provided information and the judging rubric.
+You are an AI Hackathon Judge for Ethereum Global hackathons. Evaluate the following project based on the provided information and the judging rubric.
 
 **Project Information:**
 1.  **Project Description:** {project_description}
 2.  **Pitch Transcript:** {pitch_transcript if pitch_transcript else "Not available"}
 3.  **README Content:** {readme_content if readme_content and not readme_content.startswith('Error:') else "Not available"}{commit_info}
+
+**Reference: Previous ETHGlobal Winning Projects**
+The following are descriptions of previous winning projects from ETHGlobal hackathons. Use these as reference points when evaluating the current project:
+
+{winning_projects_text[:3000]}  
 
 **Judging Rubric:**
 {criteria_str}
@@ -505,8 +520,9 @@ You are an AI Hackathon Judge. Evaluate the following project based on the provi
 **Instructions:**
 1.  Provide a score between {rubric['scale'][0]} and {rubric['scale'][1]} for each criterion.
 2.  For each criterion, provide a **detailed rationale** (3-5 sentences) explaining *why* the project received that specific score, referencing specific aspects of the project description, transcript, or README where applicable.
-3.  Provide an overall **feedback** section (a paragraph or bullet points) summarizing the project's strengths and suggesting specific areas for improvement.
-4.  Output the results strictly in JSON format with the following structure:
+3.  Compare the project to previous winning projects where relevant, noting similarities or differences in quality, innovation, or execution.
+4.  Provide an overall **feedback** section (a paragraph or bullet points) summarizing the project's strengths and suggesting specific areas for improvement.
+5.  Output the results strictly in JSON format with the following structure:
 {{
   "scores": {{
     "Criterion Name 1": score_1,
@@ -525,6 +541,8 @@ Ensure the keys in "scores" and "rationales" exactly match the criterion names f
 
 **Special Instructions:**
 - If the GitHub repository has only a single commit, this should negatively impact the Technicality score, as it suggests minimal development effort or history.
+- Consider how the current project compares to the quality and innovation level of previous winning projects.
+- Be particularly attentive to projects that demonstrate novel approaches to blockchain technology or solve real-world problems in unique ways.
 
 **JSON Output:**
 """

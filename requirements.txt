@@ -1,4 +1,4 @@
-streamlit>=1.30.0 # Keep a minimum Streamlit version
+streamlit==1.30.0 
 openai
 anthropic
 moviepy==1.0.3  # Pin moviepy
@@ -10,4 +10,5 @@ beautifulsoup4 # For web scraping
 lxml           # Add the lxml parser library
 numpy==1.24.3  # Pin numpy (compatible with older moviepy)
 pillow
-web3==5.31.1   # Replace 6.11.1 with this older version that has geth_poa_middleware 
+web3==5.31.1
+protobuf==3.19.5  # Explicitly pin protobuf to the version web3 needs 

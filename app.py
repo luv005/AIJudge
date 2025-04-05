@@ -140,17 +140,22 @@ if st.session_state.projects and not st.session_state.processing:
                                     st.error(f"Failed to judge {project['name']}: {ai_result['error']}")
                                     scores = {c['name']: 0 for c in rubric['criteria']} # Assign 0 scores on error
                                     rationales = {c['name']: f"Judging failed: {ai_result['error']}" for c in rubric['criteria']}
+                                    # --- Add default feedback on error ---
+                                    feedback = f"AI Judging Error: {ai_result['error']}"
                                     total_score = 0
                                     project["status"] = "Error"
                                 else:
                                     scores = ai_result.get("scores", {})
                                     rationales = ai_result.get("rationales", {})
+                                    # --- Get feedback from successful result ---
+                                    feedback = ai_result.get("feedback", "No feedback provided by AI.")
                                     total_score = utils.calculate_total_score(scores, rubric)
                                     project["status"] = "Judged"
                                     project_status_placeholder.success("Judgment complete!")
 
-                                final_scores = scores
-                                total_score = total_score
+                                # This part was outside the else block, should be inside or handled differently
+                                # final_scores = scores # This variable isn't used later
+                                # total_score = total_score # This assignment is redundant
 
                 except Exception as e:
                     project["status"] = f"Error: {e}"
@@ -159,6 +164,8 @@ if st.session_state.projects and not st.session_state.processing:
                     ai_result = {"error": str(e)}
                     scores = {c['name']: 0 for c in rubric['criteria']} # Assign 0 scores on error
                     rationales = {c['name']: f"Judging failed: {e}" for c in rubric['criteria']}
+                    # --- Add default feedback on exception ---
+                    feedback = f"Processing Error: {e}"
                     total_score = 0
 
                 # Store results regardless of success/failure for display
@@ -166,8 +173,11 @@ if st.session_state.projects and not st.session_state.processing:
                     "Project Name": project["name"],
                     "Description": project["description"],
                     "Total Score": total_score,
-                    **scores, # Add individual scores to the dict
-                    "Rationales": rationales, # Keep rationales nested for now
+                    # --- Store the scores dictionary correctly ---
+                    "scores": scores, # Store the dictionary under the key "scores"
+                    "Rationales": rationales,
+                    # --- Store the feedback string ---
+                    "feedback": feedback,
                     "Transcript": transcript,
                     "README": readme_content,
                     "Status": project["status"]
@@ -204,46 +214,64 @@ elif not st.session_state.projects:
 # --- Display Results ---
 st.header("Judging Results")
 if st.session_state.results:
-    # Prepare DataFrame for display (excluding nested rationales for main table)
+    # Prepare DataFrame for display (excluding nested rationales/feedback for main table)
     display_df_data = []
     for res in st.session_state.results:
         row = {
             "Rank": len(display_df_data) + 1,
-            "Project Name": res["Project Name"],
-            "Total Score": res["Total Score"],
-            "Status": res["Status"]
+            "Project Name": res.get("Project Name", "Unknown"), # Use .get here too
+            "Total Score": res.get("Total Score", "N/A"),
+            "Status": res.get("Status", "Unknown")
         }
         # Add individual scores to the row
+        # --- Access scores correctly from the nested dictionary ---
+        project_scores = res.get("scores", {}) # Get the scores dict for this project
         for crit in rubric['criteria']:
-            row[crit['name']] = res.get(crit['name'], 'N/A') # Use .get for safety
+            row[crit['name']] = project_scores.get(crit['name'], 'N/A') # Get score from project_scores
         display_df_data.append(row)
 
     results_df = pd.DataFrame(display_df_data)
     st.dataframe(results_df.set_index('Rank'))
 
-    st.subheader("Detailed Rationales")
-    # Use expanders to show details for each project
+    # --- Display Detailed Rationales and Feedback ---
+    st.subheader("Detailed Judging Breakdown")
     for i, res in enumerate(st.session_state.results):
-        with st.expander(f"{i+1}. {res['Project Name']} (Score: {res['Total Score']})"):
-            st.markdown(f"**Description:** {res['Description']}")
-            st.markdown(f"**Status:** {res['Status']}")
-            st.markdown("**Scores & Rationales:**")
-            if isinstance(res.get("Rationales"), dict):
-                for crit in rubric['criteria']:
-                    crit_name = crit['name']
-                    score = res.get(crit_name, 'N/A')
-                    rationale = res["Rationales"].get(crit_name, "No rationale provided.")
-                    st.markdown(f"- **{crit_name}:** {score}/{rubric['scale'][1]} \n - *Rationale:* {rationale}")
-            else:
-                st.warning("Rationales not available in the expected format.")
+        st.markdown(f"---") # Separator
+        st.markdown(f"### {i+1}. {res.get('Project Name', 'Unknown Project')}")
+        st.markdown(f"**Status:** {res.get('Status', 'Unknown')}")
+        st.markdown(f"**Total Score:** {res.get('Total Score', 'N/A')}")
 
-            with st.container(): # Collapsible container for raw data
-                 st.markdown("**Raw Data:**")
-                 st.text_area("Pitch Transcript", value=res.get("Transcript", "N/A"), height=150, disabled=True)
-                 st.text_area("README Content", value=res.get("README", "N/A"), height=150, disabled=True)
+        # Display Rationales per criterion
+        st.markdown("**Scores & Rationales:**")
+        rationales = res.get('Rationales', {})
+        # --- Access scores correctly from the nested dictionary ---
+        scores = res.get('scores', {}) # Get the scores dict for this project
+        if rationales or scores: # Check if either exists
+            for crit in rubric['criteria']:
+                criterion_name = crit['name']
+                # --- Get score from the nested scores dict ---
+                score = scores.get(criterion_name, "N/A")
+                rationale = rationales.get(criterion_name, "No rationale provided.")
+                # Use an expander for each criterion
+                with st.expander(f"**{criterion_name}:** {score}/{rubric['scale'][1]}"):
+                    st.write(rationale)
+        else:
+            st.warning("No detailed scores or rationales available for this project.")
+
+        # Display Overall Feedback
+        st.markdown("**Overall Feedback:**")
+        # --- Access feedback correctly ---
+        feedback = res.get('feedback', 'No overall feedback provided.')
+        st.info(feedback) # Use st.info or st.markdown for feedback display
+
+        # Optionally display transcript and README in expanders
+        with st.expander("View Transcript"):
+            st.text_area("Transcript", res.get('Transcript', 'N/A'), height=150, disabled=True)
+        with st.expander("View README"):
+            st.text_area("README", res.get('README', 'N/A'), height=150, disabled=True)
 
 else:
-    st.info("Results will appear here after judging is complete.")
+    st.info("No results to display yet. Add projects and click 'Judge All Pending Projects'.")
 
 # --- Option to Clear Data ---
 st.sidebar.header("Admin")

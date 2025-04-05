@@ -174,9 +174,10 @@ You are an AI Hackathon Judge. Evaluate the following project based on the provi
 {criteria_str}
 
 **Instructions:**
-Provide a score between {rubric['scale'][0]} and {rubric['scale'][1]} for each criterion.
-Provide a brief rationale (1-2 sentences) explaining the score for each criterion.
-Output the results strictly in JSON format with the following structure:
+1.  Provide a score between {rubric['scale'][0]} and {rubric['scale'][1]} for each criterion.
+2.  For each criterion, provide a **detailed rationale** (3-5 sentences) explaining *why* the project received that specific score, referencing specific aspects of the project description, transcript, or README where applicable.
+3.  Provide an overall **feedback** section (a paragraph or bullet points) summarizing the project's strengths and suggesting specific areas for improvement.
+4.  Output the results strictly in JSON format with the following structure:
 {{
   "scores": {{
     "Criterion Name 1": score_1,
@@ -184,13 +185,14 @@ Output the results strictly in JSON format with the following structure:
     ...
   }},
   "rationales": {{
-    "Criterion Name 1": "Rationale text 1...",
-    "Criterion Name 2": "Rationale text 2...",
+    "Criterion Name 1": "Detailed rationale text 1...",
+    "Criterion Name 2": "Detailed rationale text 2...",
     ...
-  }}
+  }},
+  "feedback": "Overall feedback text..."
 }}
 
-Ensure the keys in "scores" and "rationales" exactly match the criterion names from the rubric: {[c['name'] for c in rubric['criteria']]}.
+Ensure the keys in "scores" and "rationales" exactly match the criterion names from the rubric: {[c['name'] for c in rubric['criteria']]}. Ensure the "feedback" key is present.
 
 **JSON Output:**
 """
@@ -219,7 +221,7 @@ Ensure the keys in "scores" and "rationales" exactly match the criterion names f
             # Basic validation of the JSON structure
             try:
                 parsed_result = json.loads(result_json)
-                if "scores" in parsed_result and "rationales" in parsed_result:
+                if "scores" in parsed_result and "rationales" in parsed_result and "feedback" in parsed_result:
                      # Further check if keys match rubric criteria names
                     expected_keys = {c['name'] for c in rubric['criteria']}
                     if set(parsed_result["scores"].keys()) == expected_keys and \
@@ -230,8 +232,8 @@ Ensure the keys in "scores" and "rationales" exactly match the criterion names f
                          # Attempt to return anyway, might need manual correction
                          return parsed_result
                 else:
-                    print("Error: AI response JSON missing 'scores' or 'rationales' key.")
-                    return {"error": "Invalid JSON structure from AI."}
+                    print("Error: AI response JSON missing 'scores', 'rationales', or 'feedback' key.")
+                    return {"error": "Invalid JSON structure from AI (missing keys)."}
             except json.JSONDecodeError as json_e:
                 print(f"Error decoding AI response JSON: {json_e}")
                 print(f"Raw AI response: {result_json}")

@@ -1,4 +1,10 @@
+# Add setuptools first to provide distutils
+setuptools>=65.5.0
+
+# Pin streamlit to a specific version
 streamlit==1.30.0 
+
+# Keep other dependencies
 openai
 anthropic
 moviepy==1.0.3  # Pin moviepy
@@ -10,5 +16,7 @@ beautifulsoup4 # For web scraping
 lxml           # Add the lxml parser library
 numpy==1.24.3  # Pin numpy (compatible with older moviepy)
 pillow
+
+# Pin web3 and protobuf to compatible versions
 web3==5.31.1
 protobuf==3.19.5  # Explicitly pin protobuf to the version web3 needs 

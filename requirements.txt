@@ -2,18 +2,11 @@
 setuptools>=65.5.0
 
 # Pin streamlit to a specific version
-streamlit==1.30.0 
+streamlit==1.30.0
 
 # Keep other dependencies
 openai
 anthropic
-
-# Use pre-built wheels for problematic packages
---find-links https://download.pytorch.org/whl/torch_stable.html
---find-links https://download.lfd.uci.edu/pythonlibs/archived/cp312/
-numpy==1.24.3
-
-# Other dependencies
 requests
 python-dotenv
 pandas
@@ -22,9 +15,12 @@ beautifulsoup4
 lxml
 pillow
 
+# Try a newer numpy version with potentially better Python 3.12 support
+numpy==1.26.4
+
 # Pin web3 and protobuf to compatible versions
 web3==5.31.1
 protobuf==3.19.5
 
-# Add moviepy after numpy is installed
+# Add moviepy last (depends on numpy)
 moviepy==1.0.3 

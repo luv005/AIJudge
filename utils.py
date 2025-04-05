@@ -13,6 +13,25 @@ import re
 from anthropic import Anthropic
 import numpy as np
 
+# --- Graceful Import for MoviePy ---
+ENABLE_VIDEO_PROCESSING = True
+VideoFileClip = None # Initialize as None
+try:
+    from moviepy.editor import VideoFileClip
+    print("DEBUG: Successfully imported moviepy.editor.VideoFileClip")
+except ImportError as e:
+    print(f"ERROR: Failed to import moviepy.editor: {e}. Video processing will be disabled.")
+    # Try importing the base moviepy library to see if that works
+    try:
+        import moviepy
+        print(f"DEBUG: Base 'moviepy' library imported successfully (version: {moviepy.__version__}). Issue might be with submodules or dependencies like ffmpeg.")
+    except ImportError as ie:
+        print(f"ERROR: Failed to import even the base 'moviepy' library: {ie}")
+    ENABLE_VIDEO_PROCESSING = False
+except Exception as e: # Catch other potential errors during import
+    print(f"ERROR: An unexpected error occurred during moviepy import: {e}. Video processing will be disabled.")
+    ENABLE_VIDEO_PROCESSING = False
+
 # --- Force loading .env and specify path ---
 # Find the .env file starting from the current script's directory
 dotenv_path = find_dotenv()
@@ -402,23 +421,43 @@ def download_video_from_url(url, output_dir):
         print(f"Error downloading video: {e}")
         return None
 
-def extract_audio_from_video(video_path):
-    """Extracts audio from a video file path and saves as temporary mp3."""
-    if not video_path or not os.path.exists(video_path):
-        print(f"Error: Video file not found at path: {video_path}")
-        return None
+def extract_audio_from_video(video_path, output_audio_path="temp_audio.mp3"):
+    """Extracts audio from a video file."""
+    if not ENABLE_VIDEO_PROCESSING or VideoFileClip is None:
+        print("WARNING: Video processing is disabled due to import failure.")
+        return None # Return None or False, indicating failure
+
     try:
-        video_clip = VideoFileClip(video_path)
-        # Create audio path in the same directory or a specific temp location
-        base, _ = os.path.splitext(video_path)
-        audio_path = base + ".mp3"
-        video_clip.audio.write_audiofile(audio_path, codec='libmp3lame')
-        video_clip.close() # Close the video clip to release the file handle
-        # Don't remove the video file here, it might be needed elsewhere or cleaned up later
-        return audio_path
+        print(f"DEBUG: Attempting to process video: {video_path}")
+        video = VideoFileClip(video_path)
+        audio = video.audio
+        # Ensure output_audio_path is defined if not passed
+        if not output_audio_path:
+             # Create a temporary file path for the audio
+             temp_dir = tempfile.gettempdir()
+             output_audio_path = os.path.join(temp_dir, "extracted_audio.mp3")
+
+        audio.write_audiofile(output_audio_path)
+        audio.close() # Close the audio object
+        video.close() # Close the video object
+        print(f"DEBUG: Audio extracted successfully to {output_audio_path}")
+        return output_audio_path # Return the path on success
+    # Specific check for ffmpeg issues if possible (depends on moviepy's exceptions)
+    except NameError: # If VideoFileClip is None
+         print("ERROR: VideoFileClip class not available due to import error.")
+         return None
+    except OSError as e:
+         print(f"ERROR: OSError during audio extraction (often indicates ffmpeg issue): {e}")
+         # Check if ffmpeg command is mentioned in the error
+         if 'ffmpeg' in str(e).lower():
+              print("ERROR: This might be related to ffmpeg not being found or configured correctly in the environment.")
+         return None
     except Exception as e:
-        print(f"Error extracting audio: {e}")
-        return None
+        print(f"ERROR: Unexpected error extracting audio: {e}")
+        # Clean up potentially created video/audio objects if they exist
+        if 'video' in locals() and video: video.close()
+        if 'audio' in locals() and audio: audio.close()
+        return None # Return None or False on failure
 
 def transcribe_audio(audio_path):
     """Transcribes audio using OpenAI Whisper API."""

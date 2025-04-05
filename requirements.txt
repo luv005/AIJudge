@@ -1,9 +1,12 @@
-streamlit
+streamlit>=1.30.0 # Keep a minimum Streamlit version
 openai
+anthropic
 moviepy
 requests
 python-dotenv  # For loading .env file locally
 pandas         # Useful for handling and displaying data
 yt-dlp          # For downloading videos from URLs
 beautifulsoup4 # For web scraping
-lxml           # Add the lxml parser library 
+lxml           # Add the lxml parser library
+numpy
+pillow 

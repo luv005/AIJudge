@@ -18,9 +18,11 @@ pillow
 # Try a newer numpy version with potentially better Python 3.12 support
 numpy==1.26.4
 
-# Pin web3 and protobuf to compatible versions
-web3==5.31.1
-protobuf==3.19.5
+# Pin web3 to a version that works with protobuf>=3.20
+web3==6.0.0
+
+# Use protobuf version compatible with streamlit
+protobuf==3.20.0
 
 # Add moviepy last (depends on numpy)
 moviepy==1.0.3 

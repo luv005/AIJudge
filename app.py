@@ -606,3 +606,9 @@ if st.sidebar.button("Clear All Projects and Results"):
     st.session_state.results = None
     st.session_state.processing = False
     st.rerun() # Rerun the app to reflect the cleared state 
+
+# Add some space at the bottom of the sidebar
+st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
+
+# Add the attribution to the sidebar
+st.sidebar.markdown("<div style='color: rgba(38, 39, 48, 0.7); font-size: 14px;'>Made by Queenie Wu and Lucas</div>", unsafe_allow_html=True) 

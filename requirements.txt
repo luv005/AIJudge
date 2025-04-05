@@ -1,0 +1,7 @@
+streamlit
+openai
+moviepy
+requests
+python-dotenv  # For loading .env file locally
+pandas         # Useful for handling and displaying data
+yt-dlp          # For downloading videos from URLs 

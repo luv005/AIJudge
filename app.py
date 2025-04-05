@@ -518,15 +518,21 @@ st.sidebar.header("🏆 Reward Distribution (Polygon)")
 # Check if distributor key is configured
 distributor_pk_configured = os.getenv("DISTRIBUTOR_PRIVATE_KEY") is not None
 if not distributor_pk_configured:
-    st.sidebar.warning(
+    # Make the warning more prominent with a colored box and emoji
+    st.sidebar.error(
         """
-        **Configuration Required:** Add your distributor wallet private key to the `.env` file:
+        ⚠️ **SETUP REQUIRED** ⚠️
+        
+        Add your distributor wallet private key to the `.env` file:
         ```
         DISTRIBUTOR_PRIVATE_KEY=your_private_key_here
         ```
         For security, NEVER share this key or commit it to version control.
         """
     )
+else:
+    # Show a success message when configured
+    st.sidebar.success("✅ Distributor wallet configured")
 
 st.sidebar.subheader("Winners Data")
 winners_input = st.sidebar.text_area(

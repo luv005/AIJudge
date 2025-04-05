@@ -515,24 +515,29 @@ else:
 # --- Reward Distribution Section (In Sidebar) ---
 st.sidebar.header("🏆 Reward Distribution (Polygon)")
 
-# Check if distributor key is configured
+# Check if distributor key is configured in environment
 distributor_pk_configured = os.getenv("DISTRIBUTOR_PRIVATE_KEY") is not None
+
+# Add input field for private key if not in environment
 if not distributor_pk_configured:
-    # Make the warning more prominent with a colored box and emoji
-    st.sidebar.error(
-        """
-        ⚠️ **SETUP REQUIRED** ⚠️
-        
-        Add your distributor wallet private key to the `.env` file:
-        ```
-        DISTRIBUTOR_PRIVATE_KEY=your_private_key_here
-        ```
-        For security, NEVER share this key or commit it to version control.
-        """
+    st.sidebar.info("Enter your distributor wallet private key below or configure it in the .env file.")
+    private_key_input = st.sidebar.text_input(
+        "Distributor Private Key (0x...)",
+        type="password",  # Hide the input for security
+        help="Your private key is never stored and only used for this session."
     )
+    # Consider the key configured if user has entered it in the UI
+    distributor_pk_configured = bool(private_key_input)
 else:
-    # Show a success message when configured
-    st.sidebar.success("✅ Distributor wallet configured")
+    st.sidebar.success("✅ Distributor wallet configured via environment")
+    private_key_input = None  # No need for input if configured in environment
+
+# RPC URL input with default
+rpc_url_input = st.sidebar.text_input(
+    "Polygon RPC URL (optional)",
+    value=os.getenv("POLYGON_RPC_URL", "https://polygon-bor-rpc.publicnode.com"),
+    help="Default public RPC is provided, but you can use your own for better reliability."
+)
 
 st.sidebar.subheader("Winners Data")
 winners_input = st.sidebar.text_area(
@@ -544,7 +549,7 @@ winners_input = st.sidebar.text_area(
 
 if st.sidebar.button("💸 Distribute Rewards", key="distribute_button", disabled=not distributor_pk_configured):
     if not distributor_pk_configured:
-        st.sidebar.error("Distributor private key is not configured in the .env file.")
+        st.sidebar.error("Please enter your distributor private key.")
     elif not winners_input:
         st.sidebar.error("Winners data cannot be empty.")
     else:
@@ -564,11 +569,11 @@ if st.sidebar.button("💸 Distribute Rewards", key="distribute_button", disable
 
             st.sidebar.info(f"Parsed {len(parsed_winners)} winner entries. Starting distribution...")
 
-            # Call the backend function - now without passing the private key directly
+            # Call the backend function - now passing the private key from UI if needed
             with st.spinner("Sending transactions... Please wait."):
                 distribution_results = utils.distribute_rewards(
-                    # private_key is now loaded from environment in the function
-                    # rpc_url is now loaded from environment in the function
+                    private_key=private_key_input,  # Use UI input if provided
+                    rpc_url=rpc_url_input,          # Use UI input for RPC
                     winners_data=parsed_winners,
                     # token_address is now loaded from environment in the function
                 )

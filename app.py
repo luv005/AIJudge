@@ -518,27 +518,6 @@ st.sidebar.header("🏆 Reward Distribution (Polygon)")
 # Check if distributor key is configured in environment
 distributor_pk_configured = os.getenv("DISTRIBUTOR_PRIVATE_KEY") is not None
 
-# Add input field for private key if not in environment
-if not distributor_pk_configured:
-    st.sidebar.info("Enter your distributor wallet private key below or configure it in the .env file.")
-    private_key_input = st.sidebar.text_input(
-        "Distributor Private Key (0x...)",
-        type="password",  # Hide the input for security
-        help="Your private key is never stored and only used for this session."
-    )
-    # Consider the key configured if user has entered it in the UI
-    distributor_pk_configured = bool(private_key_input)
-else:
-    st.sidebar.success("✅ Distributor wallet configured via environment")
-    private_key_input = None  # No need for input if configured in environment
-
-# RPC URL input with default
-rpc_url_input = st.sidebar.text_input(
-    "Polygon RPC URL (optional)",
-    value=os.getenv("POLYGON_RPC_URL", "https://polygon-bor-rpc.publicnode.com"),
-    help="Default public RPC is provided, but you can use your own for better reliability."
-)
-
 st.sidebar.subheader("Winners Data")
 winners_input = st.sidebar.text_area(
     "Enter Winners (Address,Polygon Amount per line)",

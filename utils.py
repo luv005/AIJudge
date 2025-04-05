@@ -9,6 +9,7 @@ import json
 import yt_dlp # Import the downloader library
 from bs4 import BeautifulSoup # Import BeautifulSoup
 from urllib.parse import urljoin # To construct absolute URLs
+import re
 
 # --- Force loading .env and specify path ---
 # Find the .env file starting from the current script's directory
@@ -186,6 +187,28 @@ def scrape_project_page(url):
             else:
                 print("DEBUG: Player container div with data-controller='video-player' not found.")
 
+        # 2.5 Look for Mux video URL in the HTML source (new method)
+        if not video_url:
+            print("DEBUG: Method 2.5: Searching for Mux video URL pattern in HTML source.")
+            # Look for the pattern "https://stream.mux.com/XXXX/high.mp4" in the HTML
+            mux_pattern = r'https://stream\.mux\.com/([A-Za-z0-9]+)/high\.mp4'
+            mux_matches = re.findall(mux_pattern, str(soup))
+            if mux_matches:
+                # Use the first match
+                playback_id = mux_matches[0]
+                video_url = f"https://stream.mux.com/{playback_id}/high.mp4"
+                print(f"DEBUG: Found Mux video URL in HTML source with playback ID: {playback_id}")
+            else:
+                # Also try looking for thumbnail URLs which contain the same ID
+                thumbnail_pattern = r'https://image\.mux\.com/([A-Za-z0-9]+)/thumbnail\.png'
+                thumbnail_matches = re.findall(thumbnail_pattern, str(soup))
+                if thumbnail_matches:
+                    playback_id = thumbnail_matches[0]
+                    video_url = f"https://stream.mux.com/{playback_id}/high.mp4"
+                    print(f"DEBUG: Found Mux thumbnail URL in HTML source with playback ID: {playback_id}")
+                else:
+                    print("DEBUG: No Mux video or thumbnail URL patterns found in HTML source.")
+
         # 3. Fallback: Look for a direct <video> tag with a src attribute
         if not video_url:
             print("DEBUG: Method 3: Falling back to searching for direct <video> tag.")
@@ -208,8 +231,11 @@ def scrape_project_page(url):
                 if project_id and len(project_id) > 3:
                     # Known project mappings - add more as they're discovered
                     known_projects = {
-                        "87obi": "01CwsoCbFScKx1xpGUvmkIDYXD02Dq7TbjdPS5zUx014fw",  # Ape Tweet
-                        "g0jzy": "2pCxag501Mbk02Qi5Q21ydMM2qQg2hkCi47Fxn02gPgPPM"   # Prophet AI
+                        # "87obi": "01CwsoCbFScKx1xpGUvmkIDYXD02Dq7TbjdPS5zUx014fw",  # Ape Tweet
+                        # "g0jzy": "2pCxag501Mbk02Qi5Q21ydMM2qQg2hkCi47Fxn02gPgPPM",   # Prophet AI
+                        # "xqc2b": "8uakAxLbWvxkgrg71prSbgYxbjjSrsBvtimp025h00jyM",    # Sentiplex
+                        # "aa4xc": "01Gy9Yx01Gy9Yx01Gy9Yx01Gy9Yx01Gy9Yx01Gy9Yx01Gy9Yx01Gy9Yx"  # Rupabase (placeholder ID)
+                    
                     }
                     
                     if project_id in known_projects:
@@ -217,10 +243,20 @@ def scrape_project_page(url):
                         video_url = f"https://stream.mux.com/{mux_id}/high.mp4"
                         print(f"DEBUG: Using known Mux URL for project ID {project_id}: {video_url}")
                     else:
-                        # For other projects, we'll need to make an educated guess
-                        # This is a placeholder URL that will likely fail but shows the intent
-                        video_url = f"https://ethglobal.com/api/projects/{project_id}/video"
-                        print(f"DEBUG: Constructed fallback URL for project ID {project_id}: {video_url}")
+                        # For other projects, construct the API URL and follow redirects
+                        api_url = f"https://ethglobal.com/api/projects/{project_id}/video"
+                        # Use the transform_ethglobal_video_url function to follow redirects
+                        transformed_url = transform_ethglobal_video_url(api_url)
+                        
+                        # Only use the transformed URL if it's different from the API URL
+                        # (meaning the redirect was successful)
+                        if transformed_url != api_url:
+                            video_url = transformed_url
+                            print(f"DEBUG: Successfully transformed API URL for project ID {project_id}: {video_url}")
+                        else:
+                            # If transformation failed, set to None so "Video URL Not Found" will be used
+                            print(f"DEBUG: Failed to transform API URL for project ID {project_id}")
+                            video_url = None
                 else:
                     print(f"DEBUG: Could not extract valid project ID from URL: {url}")
             except Exception as e:
@@ -308,44 +344,56 @@ def scrape_project_list_page(list_url):
 
 # --- Preprocessing Functions ---
 
-def download_video_from_url(url, download_dir):
-    """Downloads video from URL using yt-dlp to a specified directory."""
-    ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best', # Prefer mp4
-        'outtmpl': os.path.join(download_dir, '%(title)s.%(ext)s'), # Save with title and extension
-        'quiet': True, # Suppress console output
-        'merge_output_format': 'mp4', # Ensure merged output is mp4 if separate streams are downloaded
-        # Add options to limit download size/duration if needed for large videos
-        # 'max_filesize': '100M', # Example: Limit file size
-    }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info_dict = ydl.extract_info(url, download=True)
-            # Construct the expected filename based on yt-dlp's template
-            # Note: This might need adjustment if titles have tricky characters
-            # A more robust way is to hook into the download progress to get the exact final path
-            downloaded_path = ydl.prepare_filename(info_dict)
-
-            # Check if the file exists after download attempt
-            if os.path.exists(downloaded_path):
-                 print(f"Video downloaded successfully to: {downloaded_path}")
-                 return downloaded_path
-            else:
-                 # Sometimes yt-dlp changes the extension (e.g., .webm -> .mp4)
-                 # Try finding the downloaded file if the exact path doesn't match
-                 files_in_dir = os.listdir(download_dir)
-                 if len(files_in_dir) == 1:
-                     actual_path = os.path.join(download_dir, files_in_dir[0])
-                     print(f"Video downloaded successfully (found as): {actual_path}")
-                     return actual_path
-                 else:
-                     print(f"Error: Downloaded file not found or multiple files in temp dir for URL {url}")
-                     return None
-    except yt_dlp.utils.DownloadError as e:
-        print(f"Error downloading video from {url}: {e}")
+def download_video_from_url(url, output_dir):
+    """Downloads a video from a URL to the specified directory."""
+    if not url:
+        print("No URL provided for video download")
         return None
+    
+    # Transform ETHGlobal URLs if needed
+    url = transform_ethglobal_video_url(url)
+    
+    try:
+        # Create a unique filename for the video
+        video_path = os.path.join(output_dir, "downloaded_video.mp4")
+        
+        # Configure yt-dlp options
+        ydl_opts = {
+            'format': 'best',  # Download best quality
+            'outtmpl': video_path,  # Output template
+            'quiet': True,  # Less output
+            'no_warnings': True,  # No warnings
+            'ignoreerrors': True,  # Skip on errors
+        }
+        
+        # For direct MP4 URLs, use requests instead of yt-dlp
+        if url.endswith('.mp4') or 'stream.mux.com' in url:
+            print(f"Direct MP4 URL detected: {url}")
+            response = requests.get(url, stream=True)
+            if response.status_code == 200:
+                with open(video_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                print(f"Video downloaded to {video_path}")
+                return video_path
+            else:
+                print(f"Failed to download video: HTTP {response.status_code}")
+                return None
+        
+        # Use yt-dlp for other URLs
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+            
+        # Check if file exists and has content
+        if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+            print(f"Video downloaded to {video_path}")
+            return video_path
+        else:
+            print("Video download failed or file is empty")
+            return None
+            
     except Exception as e:
-        print(f"An unexpected error occurred during video download from {url}: {e}")
+        print(f"Error downloading video: {e}")
         return None
 
 def extract_audio_from_video(video_path):
@@ -421,14 +469,28 @@ def fetch_readme(repo_url):
 
 # --- AI Judging Function ---
 
-def get_ai_judgment(project_description, pitch_transcript, readme_content, rubric):
+def get_ai_judgment(project_description, pitch_transcript, readme_content, rubric, repo_url=None):
     """Generates AI judgment using OpenAI GPT-4o based on provided texts and rubric."""
+    
+    # Get commit count if repo_url is provided
+    commit_count = None
+    if repo_url and "github.com" in repo_url:
+        commit_count = get_github_commit_count(repo_url)
+        print(f"DEBUG: GitHub repository has {commit_count} commits")
+    
     # --- Ensure criteria_str uses the passed rubric ---
     criteria_str = "\n".join([
         f"- {c['name']} (Weight: {c['weight']}%, Scale: {rubric['scale'][0]}-{rubric['scale'][1]}): {c['description']}"
         for c in rubric['criteria'] # Use the rubric passed to the function
     ])
 
+    # Add commit count information to the prompt
+    commit_info = ""
+    if commit_count is not None:
+        commit_info = f"\n4. **GitHub Repository Commit Count:** {commit_count} commits"
+        if commit_count == 1:
+            commit_info += " (Note: Having only a single commit may indicate limited development effort or history, which should be considered when evaluating Technicality)"
+    
     # --- Ensure the prompt uses the passed rubric's criteria names ---
     prompt = f"""
 You are an AI Hackathon Judge. Evaluate the following project based on the provided information and the judging rubric.
@@ -436,7 +498,7 @@ You are an AI Hackathon Judge. Evaluate the following project based on the provi
 **Project Information:**
 1.  **Project Description:** {project_description}
 2.  **Pitch Transcript:** {pitch_transcript if pitch_transcript else "Not available"}
-3.  **README Content:** {readme_content if readme_content and not readme_content.startswith('Error:') else "Not available"}
+3.  **README Content:** {readme_content if readme_content and not readme_content.startswith('Error:') else "Not available"}{commit_info}
 
 **Judging Rubric:**
 {criteria_str}
@@ -460,7 +522,10 @@ You are an AI Hackathon Judge. Evaluate the following project based on the provi
   "feedback": "Overall feedback text..."
 }}
 
-Ensure the keys in "scores" and "rationales" exactly match the criterion names from the rubric: {[c['name'] for c in rubric['criteria']]}. Ensure the "feedback" key is present. # Use the passed rubric here too
+Ensure the keys in "scores" and "rationales" exactly match the criterion names from the rubric: {[c['name'] for c in rubric['criteria']]}. Ensure the "feedback" key is present.
+
+**Special Instructions:**
+- If the GitHub repository has only a single commit, this should negatively impact the Technicality score, as it suggests minimal development effort or history.
 
 **JSON Output:**
 """
@@ -549,3 +614,176 @@ def calculate_total_score(scores, rubric):
     # Let's keep it on the 1-10 scale for now, consistent with criteria.
     # return round(total_score * 10, 2) # Example: Scale to 100
     return round(total_score, 2) # Keep on 1-10 scale 
+
+# Add this function to utils.py to check the number of commits in a GitHub repository
+
+def get_github_commit_count(repo_url):
+    """
+    Fetches the number of commits in a GitHub repository.
+    Returns the commit count or None if there was an error.
+    """
+    if not repo_url or "github.com" not in repo_url:
+        print(f"Invalid GitHub URL: {repo_url}")
+        return None
+    
+    try:
+        # Parse the owner and repo from the URL
+        parts = repo_url.strip('/').split('/')
+        if len(parts) < 5 or parts[2] != 'github.com':
+            print(f"Invalid GitHub URL format: {repo_url}")
+            return None
+            
+        owner, repo = parts[3], parts[4]
+        
+        # GitHub API endpoint for commits
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/commits?per_page=1"
+        
+        # Make the request with headers to check the total count
+        headers = {'Accept': 'application/vnd.github.v3+json'}
+        response = requests.get(api_url, headers=headers)
+        
+        if response.status_code == 200:
+            # GitHub returns the total count in the Link header for pagination
+            link_header = response.headers.get('Link', '')
+            
+            if 'rel="last"' in link_header:
+                # Extract the page number from the last link
+                last_link = [link for link in link_header.split(',') if 'rel="last"' in link][0]
+                page_num = last_link.split('page=')[1].split('&')[0].split('>')[0]
+                return int(page_num)
+            else:
+                # If there's no "last" link, count the commits in the response
+                commits = response.json()
+                return len(commits)
+        else:
+            print(f"GitHub API error: {response.status_code} - {response.text}")
+            return None
+            
+    except Exception as e:
+        print(f"Error fetching GitHub commit count: {e}")
+        return None 
+
+def transform_ethglobal_video_url(url):
+    """
+    Transform ETHGlobal API video URLs to their actual streaming URLs.
+    
+    Args:
+        url (str): The original video URL
+        
+    Returns:
+        str: The transformed URL if it's an ETHGlobal API URL, otherwise the original URL
+    """
+    # Check if this is an ETHGlobal API URL
+    if url and "ethglobal.com/api/projects" in url and "/video" in url:
+        try:
+            print(f"DEBUG: Attempting to follow redirects for {url}")
+            
+            # Use a session to maintain cookies and headers
+            session = requests.Session()
+            
+            # Set headers to mimic a browser
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Referer': 'https://ethglobal.com/'
+            }
+            
+            # First make a HEAD request to check redirects without downloading content
+            head_response = session.head(url, headers=headers, allow_redirects=True)
+            print(f"DEBUG: HEAD request status: {head_response.status_code}, final URL: {head_response.url}")
+            
+            # If HEAD request doesn't work well, try a GET request
+            if head_response.status_code != 200 or head_response.url == url:
+                print("DEBUG: HEAD request didn't redirect properly, trying GET request")
+                get_response = session.get(url, headers=headers, allow_redirects=True, stream=True)
+                
+                # Read just a small part of the response to trigger redirects without downloading the whole file
+                _ = next(get_response.iter_content(1024), None)
+                
+                # Close the connection
+                get_response.close()
+                
+                final_url = get_response.url
+                print(f"DEBUG: GET request status: {get_response.status_code}, final URL: {final_url}")
+            else:
+                final_url = head_response.url
+            
+            # Check if we got a Mux URL or any video URL
+            if "stream.mux.com" in final_url or final_url.endswith('.mp4'):
+                print(f"DEBUG: Successfully found video URL: {final_url}")
+                return final_url
+            else:
+                print(f"DEBUG: Redirect didn't lead to a video URL: {final_url}")
+                
+                # Extract project ID from the original URL
+                project_id = url.split('/')[-2]  # Format: .../projects/70emz/video
+                
+                # Try constructing a Mux URL directly using a pattern
+                # This is a fallback method based on observed patterns
+                mux_url = f"https://stream.mux.com/{project_id}/high.mp4"
+                print(f"DEBUG: Attempting fallback Mux URL: {mux_url}")
+                
+                # Test if this URL works
+                test_response = session.head(mux_url)
+                if test_response.status_code == 200:
+                    print(f"DEBUG: Fallback Mux URL works: {mux_url}")
+                    return mux_url
+                else:
+                    print(f"DEBUG: Fallback Mux URL failed with status {test_response.status_code}")
+                    return url
+        except Exception as e:
+            print(f"DEBUG: Error transforming ETHGlobal video URL: {e}")
+            return url
+    return url
+
+def scrape_ethglobal_project(url):
+    """Scrapes project details from an ETHGlobal showcase URL."""
+    try:
+        # Extract project ID from URL
+        project_id = url.split('/')[-1]
+        
+        # Make request to the page
+        response = requests.get(url)
+        if response.status_code != 200:
+            return {"error": f"Failed to fetch page: {response.status_code}"}
+        
+        # Parse HTML
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Extract project name
+        project_name = soup.find('h1').text.strip()
+        
+        # Extract project description
+        project_desc_elem = soup.find('div', class_='project-description')
+        project_description = project_desc_elem.text.strip() if project_desc_elem else "Description not found"
+        
+        # Get the actual video URL by following the redirect
+        video_api_url = f"https://ethglobal.com/api/projects/{project_id}/video"
+        try:
+            # Make a HEAD request to get the redirect URL without downloading content
+            video_response = requests.head(video_api_url, allow_redirects=True)
+            if video_response.status_code == 200:
+                # Get the final URL after redirects
+                video_url = video_response.url
+            else:
+                video_url = "Video URL Not Found"
+        except Exception as e:
+            print(f"Error getting video URL: {e}")
+            video_url = "Video URL Not Found"
+        
+        # Find GitHub link
+        github_link = "GitHub Link Not Found"
+        source_code_link = soup.find('a', text='Source Code')
+        if source_code_link:
+            github_link = source_code_link['href']
+        
+        return {
+            "name": project_name,
+            "description": project_description,
+            "video_url": video_url,
+            "repo_link": github_link
+        }
+        
+    except Exception as e:
+        return {"error": f"Error scraping ETHGlobal project: {e}"} 

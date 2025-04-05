@@ -170,13 +170,23 @@ if st.session_state.projects:
         full_desc = p.get('description', 'N/A')
         # --- Truncate description for the table ---
         truncated_desc = (full_desc[:150] + '...') if len(full_desc) > 150 else full_desc
+        
+        # Handle video URL - show N/A if missing or error
+        video_url = p.get('video_url', 'N/A')
+        if not video_url or video_url == "Video URL Not Found":
+            video_url = 'N/A'
+            
+        # Handle GitHub repo link - show N/A if missing or error
+        repo_link = p.get('repo_link', 'N/A')
+        if not repo_link or repo_link == "GitHub Link Not Found":
+            repo_link = 'N/A'
 
         display_data.append({
             "Project Name": p.get('name', 'N/A'),
             # --- Show truncated description ---
             "Project Description": truncated_desc,
-            "Video Url": p.get('video_url', 'Not Found') if p.get('video_url') and p.get('video_url') != "Video URL Not Found" else 'Not Found',
-            "Github Repo link": p.get('repo_link', 'Not Found') if p.get('repo_link') and p.get('repo_link') != "GitHub Link Not Found" else 'Not Found',
+            "Video Url": video_url,
+            "Github Repo link": repo_link,
         })
     st.dataframe(pd.DataFrame(display_data), use_container_width=True)
     # Optional: Add expanders below the table to show full descriptions if needed
@@ -270,60 +280,65 @@ if st.session_state.projects and not st.session_state.processing:
 
                     # --- 1. Download Video ---
                     project_status_placeholder.info("⬇️ Downloading video...")
-                    downloaded_video_path = utils.download_video_from_url(project["video_url"], temp_project_dir)
-                    if not downloaded_video_path:
-                        project["status"] = "Error: Video Download Failed"
-                        transcript = "N/A - Video download failed"
-                        raise Exception("Video download failed") # Skip to finally block for cleanup
-                    else:
-                        project_status_placeholder.info("🔈 Extracting audio...")
-                        # --- 2. Extract Audio ---
-                        # Pass the path to the downloaded video
-                        audio_path = utils.extract_audio_from_video(downloaded_video_path)
-
-                        if not audio_path:
-                            project["status"] = "Error: Audio Extraction Failed"
-                            transcript = "N/A - Audio extraction failed"
-                            raise Exception("Audio extraction failed") # Skip to finally block for cleanup
+                    if project["video_url"] and project["video_url"] != "Video URL Not Found" and project["video_url"] != "N/A":
+                        # Transform ETHGlobal video URLs if needed
+                        video_url = utils.transform_ethglobal_video_url(project["video_url"])
+                        downloaded_video_path = utils.download_video_from_url(video_url, temp_project_dir)
+                        if not downloaded_video_path:
+                            project_status_placeholder.warning("⚠️ Video download failed, continuing without video")
+                            transcript = "N/A - No video available"
                         else:
-                            project_status_placeholder.info("2. Transcribing audio (Whisper)...")
-                            transcript = utils.transcribe_audio(audio_path)
-                            if "Error:" in transcript:
-                                project["status"] = "Error: Transcription Failed"
+                            project_status_placeholder.info("🔈 Extracting audio...")
+                            # --- 2. Extract Audio ---
+                            audio_path = utils.extract_audio_from_video(downloaded_video_path)
+                            if not audio_path:
+                                project_status_placeholder.warning("⚠️ Audio extraction failed, continuing without transcript")
+                                transcript = "N/A - Audio extraction failed"
                             else:
-                                project_status_placeholder.info("📄 Fetching README...")
-                                # --- 4. Fetch README ---
-                                readme_content = utils.fetch_readme(project["repo_link"])
-                                if "Error:" in readme_content:
-                                    # Limit readme length if necessary
-                                    readme_content = readme_content[:4000] # Limit to ~4k chars
+                                project_status_placeholder.info("🎤 Transcribing audio (Whisper)...")
+                                transcript = utils.transcribe_audio(audio_path)
+                    else:
+                        project_status_placeholder.info("ℹ️ No video URL available, skipping video processing")
+                        transcript = "N/A - No video URL provided"
 
-                                project_status_placeholder.info("🤖 Calling AI Judge...")
-                                # --- 5. AI Judging ---
-                                # --- Pass the final_custom_rubric ---
-                                ai_result = utils.get_ai_judgment(
-                                    project["description"],
-                                    transcript if not transcript.startswith("Error:") else None,
-                                    readme_content if not readme_content.startswith("Error:") else None,
-                                    final_custom_rubric # Pass the rubric with custom weights
-                                )
+                    # --- 4. Fetch README ---
+                    project_status_placeholder.info("📄 Fetching README...")
+                    if project["repo_link"] and project["repo_link"] != "GitHub Link Not Found" and project["repo_link"] != "N/A":
+                        readme_content = utils.fetch_readme(project["repo_link"])
+                        if "Error:" in readme_content:
+                            # Limit readme length if necessary
+                            readme_content = readme_content[:4000]  # Limit to ~4k chars
+                    else:
+                        project_status_placeholder.info("ℹ️ No GitHub repository link available, skipping README")
+                        readme_content = "N/A - No GitHub repository link provided"
 
-                                if "error" in ai_result:
-                                    st.error(f"Failed to judge {project['name']}: {ai_result['error']}")
-                                    # Use final_custom_rubric for default scores/rationales
-                                    scores = {c['name']: 0 for c in final_custom_rubric['criteria']}
-                                    rationales = {c['name']: f"Judging failed: {ai_result['error']}" for c in final_custom_rubric['criteria']}
-                                    feedback = f"AI Judging Error: {ai_result['error']}"
-                                    total_score = 0
-                                    project["status"] = "Error"
-                                else:
-                                    scores = ai_result.get("scores", {})
-                                    rationales = ai_result.get("rationales", {})
-                                    feedback = ai_result.get("feedback", "No feedback provided by AI.")
-                                    # --- Pass final_custom_rubric to calculate score ---
-                                    total_score = utils.calculate_total_score(scores, final_custom_rubric)
-                                    project["status"] = "Judged"
-                                    project_status_placeholder.success("Judgment complete!")
+                    project_status_placeholder.info("🤖 Calling AI Judge...")
+                    # --- 5. AI Judging ---
+                    # --- Pass the final_custom_rubric ---
+                    ai_result = utils.get_ai_judgment(
+                        project["description"],
+                        transcript if not transcript.startswith("Error:") else None,
+                        readme_content if not readme_content.startswith("Error:") else None,
+                        final_custom_rubric, # Pass the rubric with custom weights
+                        project["repo_link"] # Pass the repository URL
+                    )
+
+                    if "error" in ai_result:
+                        st.error(f"Failed to judge {project['name']}: {ai_result['error']}")
+                        # Use final_custom_rubric for default scores/rationales
+                        scores = {c['name']: 0 for c in final_custom_rubric['criteria']}
+                        rationales = {c['name']: f"Judging failed: {ai_result['error']}" for c in final_custom_rubric['criteria']}
+                        feedback = f"AI Judging Error: {ai_result['error']}"
+                        total_score = 0
+                        project["status"] = "Error"
+                    else:
+                        scores = ai_result.get("scores", {})
+                        rationales = ai_result.get("rationales", {})
+                        feedback = ai_result.get("feedback", "No feedback provided by AI.")
+                        # --- Pass final_custom_rubric to calculate score ---
+                        total_score = utils.calculate_total_score(scores, final_custom_rubric)
+                        project["status"] = "Judged"
+                        project_status_placeholder.success("Judgment complete!")
 
                 except Exception as e:
                     project["status"] = f"Error: {e}"
@@ -380,35 +395,43 @@ elif not st.session_state.projects:
 # --- Display Results ---
 st.header("Judging Results")
 if st.session_state.results:
-    # --- Use the *last used* custom rubric for display headers/details ---
-    # Reconstruct the rubric used for the displayed results if possible
-    # For simplicity, we'll assume the current weights in session state
-    # reflect the weights used for the last judgment run.
-    # A more robust solution might store the rubric used with the results.
-    display_rubric = copy.deepcopy(utils.DEFAULT_RUBRIC)
-    for criterion in display_rubric['criteria']:
-        criterion['weight'] = st.session_state.custom_weights.get(criterion['name'], 0)
-
-    # Prepare DataFrame for display
+    # --- Create a DataFrame for display ---
     display_df_data = []
-    for res in st.session_state.results:
+    # Use the rubric that was actually used for judging
+    display_rubric = st.session_state.results[0].get('rubric_used', current_rubric)
+    
+    for i, res in enumerate(st.session_state.results):
+        # Create a row for each result
         row = {
-            "Rank": len(display_df_data) + 1,
-            "Project Name": res.get("Project Name", "Unknown"), # Use .get here too
-            "Total Score": res.get("Total Score", "N/A"),
-            "Status": res.get("Status", "Unknown")
+            "Project Name": res.get('Project Name', 'Unknown Project'),
+            "Total Score": res.get('Total Score', 'N/A'),
+            "Status": res.get('Status', 'Unknown')
         }
-        # Add individual scores to the row
-        # --- Access scores correctly from the nested dictionary ---
-        project_scores = res.get("scores", {}) # Get the scores dict for this project
-        for crit in display_rubric['criteria']:
-            row[crit['name']] = project_scores.get(crit['name'], 'N/A') # Get score from project_scores
+        
+        # Add a rank column (1-based index)
+        row["Rank"] = i + 1
+        
+        # Add individual criterion scores
+        scores = res.get('scores', {})
+        for criterion in display_rubric['criteria']:
+            criterion_name = criterion['name']
+            row[criterion_name] = scores.get(criterion_name, 'N/A')
+        
         display_df_data.append(row)
 
     results_df = pd.DataFrame(display_df_data)
     # --- Dynamically set columns based on display_rubric ---
     column_order = ["Rank", "Project Name", "Total Score", "Status"] + [c['name'] for c in display_rubric['criteria']]
-    st.dataframe(results_df.set_index('Rank')[column_order]) # Reorder columns
+    
+    # Check if all columns in column_order exist in the DataFrame
+    valid_columns = [col for col in column_order if col in results_df.columns]
+    
+    # Use only valid columns and set Rank as index if it exists
+    if "Rank" in results_df.columns:
+        st.dataframe(results_df.set_index("Rank")[valid_columns[1:]])  # Skip 'Rank' in columns since it's the index
+    else:
+        # If 'Rank' doesn't exist, just display with all valid columns
+        st.dataframe(results_df[valid_columns])
 
     # --- Display Detailed Judging Breakdown ---
     st.subheader("Detailed Judging Breakdown")
@@ -449,9 +472,28 @@ if st.session_state.results:
 
         # Optionally display transcript and README in expanders
         with st.expander("View Transcript"):
-            st.text_area("Transcript", res.get('Transcript', 'N/A'), height=150, disabled=True)
+            # Get transcript and handle potential issues
+            transcript = res.get('Transcript', 'N/A')
+            try:
+                # Limit length to avoid display issues
+                if len(transcript) > 50000:
+                    transcript = transcript[:50000] + "... (truncated due to length)"
+                st.markdown("```\n" + transcript + "\n```")
+            except Exception as e:
+                st.error(f"Error displaying transcript: {e}")
+                st.markdown("Transcript is available but cannot be displayed properly.")
+            
         with st.expander("View README"):
-            st.text_area("README", res.get('README', 'N/A'), height=150, disabled=True)
+            # Get README and handle potential issues
+            readme = res.get('README', 'N/A')
+            try:
+                # Limit length to avoid display issues
+                if len(readme) > 50000:
+                    readme = readme[:50000] + "... (truncated due to length)"
+                st.markdown("```\n" + readme + "\n```")
+            except Exception as e:
+                st.error(f"Error displaying README: {e}")
+                st.markdown("README is available but cannot be displayed properly.")
 
 else:
     st.info("No results to display yet. Add projects and click 'Judge All Pending Projects'.")

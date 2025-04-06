@@ -518,6 +518,21 @@ st.sidebar.header("🏆 Reward Distribution (Polygon)")
 # Check if distributor key is configured in environment
 distributor_pk_configured = os.getenv("DISTRIBUTOR_PRIVATE_KEY") is not None
 
+# Add input field for private key if not in environment
+if not distributor_pk_configured:
+    st.sidebar.info("Enter your distributor wallet private key below:")
+    private_key_input = st.sidebar.text_input(
+        "Distributor Private Key (0x...)",
+        type="password",  # Hide the input for security
+        help="Your private key is never stored and only used for this session."
+    )
+    # Consider the key configured if user has entered it in the UI
+    distributor_pk_configured = bool(private_key_input)
+else:
+    st.sidebar.success("✅ Distributor wallet configured via environment")
+    private_key_input = None  # No need for input if configured in environment
+
+
 st.sidebar.subheader("Winners Data")
 winners_input = st.sidebar.text_area(
     "Enter Winners (Address,Polygon Amount per line)",
@@ -579,8 +594,11 @@ if st.sidebar.button("💸 Distribute Rewards", key="distribute_button", disable
              st.sidebar.error(f"Input Error: {ve}")
         except Exception as e:
             st.sidebar.error(f"An unexpected error occurred: {e}")
-            # Log the full error for debugging if needed
-            print(f"Distribution Error Traceback: {e}", exc_info=True)
+            # Fix the incorrect use of exc_info with print
+            print(f"Distribution Error Traceback: {e}")
+            # If you want to print the full traceback, use this instead:
+            import traceback
+            traceback.print_exc()
 
 
 # --- Option to Clear Data ---
